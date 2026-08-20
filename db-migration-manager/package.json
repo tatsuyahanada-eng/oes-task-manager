@@ -1,0 +1,21 @@
+{
+  "name": "db-migration-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Oracle / SQL Server / PostgreSQL 対応のDB管理・移行支援ツール",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "optionalDependencies": {
+    "mssql": "^11.0.1",
+    "oracledb": "^6.8.0",
+    "pg": "^8.13.1"
+  }
+}

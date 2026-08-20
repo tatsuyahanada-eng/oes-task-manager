@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DB Migration Manager</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23000'/%3E%3Ctext x='4' y='23' font-family='monospace' font-size='18' fill='%2356d364'%3E%26gt;_%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">&gt;_</span>
+    <div>
+      <h1>db-migration-manager</h1>
+      <p class="brand-sub">oracle / sqlserver &rarr; postgresql</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span class="mode-badge" id="modeBadge" hidden></span>
+    <span class="topbar-status" id="sessionStatus">not connected</span>
+  </div>
+</header>
+
+<div class="layout">
+
+  <!-- ===== 左: 接続一覧 (設定) ===== -->
+  <aside class="sidebar">
+    <div class="pane-head">
+      <h2>connections</h2>
+      <div style="display:flex;gap:4px">
+        <button class="btn btn-sm" id="btnAudit" title="更新操作の履歴">履歴</button>
+        <button class="btn btn-sm btn-primary" id="btnNewConnection">+ 追加</button>
+      </div>
+    </div>
+    <div class="conn-list" id="connList">
+      <p class="empty">loading...</p>
+    </div>
+  </aside>
+
+  <!-- ===== 中: スキーマ / テーブル ===== -->
+  <nav class="browser">
+    <div class="browser-controls">
+      <label class="field">
+        <span>database</span>
+        <select id="databaseSelect" disabled></select>
+      </label>
+      <label class="field">
+        <span>schema</span>
+        <select id="schemaSelect" disabled></select>
+      </label>
+      <label class="field">
+        <span>filter</span>
+        <input type="search" id="tableFilter" placeholder="テーブル名で絞り込み" disabled>
+      </label>
+    </div>
+    <div class="table-list" id="tableList">
+      <p class="empty">接続先を選択してください</p>
+    </div>
+  </nav>
+
+  <!-- ===== 右: 詳細 ===== -->
+  <main class="content">
+    <div class="placeholder" id="contentPlaceholder">
+      <h2>テーブルを選択してください</h2>
+      <pre>  1. 左の一覧から接続先を選ぶ
+  2. database / schema を選ぶ
+  3. テーブルを選ぶ
+
+  データの変更は、接続設定で
+  「読み取り専用」を解除した接続でのみ行えます。</pre>
+    </div>
+
+    <div class="detail" id="detail" hidden>
+      <div class="detail-head">
+        <div>
+          <h2 id="detailTitle"></h2>
+          <p class="detail-sub" id="detailSub"></p>
+        </div>
+        <div class="tabs" role="tablist">
+          <button class="tab is-active" data-tab="data" role="tab">データ</button>
+          <button class="tab" data-tab="columns" role="tab">列定義</button>
+          <button class="tab" data-tab="keys" role="tab">索引・キー</button>
+        </div>
+      </div>
+
+      <!-- データタブ -->
+      <section class="tab-panel is-active" data-panel="data">
+        <div class="query-bar">
+          <label class="field field-grow">
+            <span>where</span>
+            <input type="text" id="whereInput" placeholder="status = 'A' AND created_at &gt;= '2026-01-01'">
+          </label>
+          <label class="field field-sm">
+            <span>rows</span>
+            <select id="limitSelect">
+              <option>50</option>
+              <option selected>100</option>
+              <option>250</option>
+              <option>500</option>
+              <option>1000</option>
+            </select>
+          </label>
+          <button class="btn btn-primary" id="btnReload">再取得</button>
+          <button class="btn" id="btnExactCount" title="COUNT(*) を実行">件数</button>
+          <button class="btn btn-write" id="btnInsertRow" hidden>+ 行を追加</button>
+        </div>
+        <div class="grid-wrap" id="dataGridWrap">
+          <p class="empty">loading...</p>
+        </div>
+        <div class="pager">
+          <button class="btn btn-sm" id="btnPrev">&larr; prev</button>
+          <span id="pagerInfo">-</span>
+          <button class="btn btn-sm" id="btnNext">next &rarr;</button>
+          <code class="sql-preview" id="sqlPreview"></code>
+        </div>
+      </section>
+
+      <!-- 列定義タブ -->
+      <section class="tab-panel" data-panel="columns">
+        <div class="grid-wrap" id="columnsWrap"></div>
+      </section>
+
+      <!-- 索引・キータブ -->
+      <section class="tab-panel" data-panel="keys">
+        <div id="keysWrap"></div>
+      </section>
+    </div>
+
+    <!-- SQL 実行 -->
+    <div class="sqlrunner" id="sqlRunner" hidden>
+      <div class="detail-head">
+        <h2>sql <span class="badge" id="sqlModeBadge">参照のみ</span></h2>
+        <button class="btn btn-sm" id="btnCloseSql">閉じる</button>
+      </div>
+      <textarea id="sqlInput" rows="6" spellcheck="false" placeholder="SELECT * FROM ..."></textarea>
+      <div class="query-bar">
+        <button class="btn btn-primary" id="btnRunSql">実行 (Ctrl+Enter)</button>
+        <span id="sqlResultInfo" class="muted"></span>
+      </div>
+      <div class="grid-wrap" id="sqlGridWrap"></div>
+    </div>
+  </main>
+</div>
+
+<button class="fab" id="btnOpenSql" title="SQL を実行">$ sql</button>
+
+<!-- ===== 接続設定モーダル ===== -->
+<div class="modal-backdrop" id="connModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="connModalTitle">
+    <h2 id="connModalTitle">接続の追加</h2>
+    <form id="connForm" autocomplete="off">
+      <input type="hidden" name="id">
+
+      <div class="form-row">
+        <label class="field">
+          <span>接続名 <em>*</em></span>
+          <input name="name" required placeholder="本番Oracle (移行元)">
+        </label>
+        <label class="field field-sm">
+          <span>用途</span>
+          <select name="role">
+            <option value="">未設定</option>
+            <option value="source">移行元</option>
+            <option value="target">移行先</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label class="field">
+          <span>DB種別 <em>*</em></span>
+          <select name="type" id="typeSelect" required></select>
+        </label>
+        <label class="field">
+          <span>ホスト <em>*</em></span>
+          <input name="host" required placeholder="db.example.local">
+        </label>
+        <label class="field field-sm">
+          <span>ポート</span>
+          <input name="port" type="number" min="1" max="65535" placeholder="自動">
+        </label>
+      </div>
+
+      <div class="form-row" data-for="oracle" hidden>
+        <label class="field">
+          <span>サービス名</span>
+          <input name="serviceName" placeholder="ORCLPDB1">
+        </label>
+        <label class="field">
+          <span>SID (サービス名を使わない場合)</span>
+          <input name="sid" placeholder="ORCL">
+        </label>
+      </div>
+
+      <div class="form-row" data-for="mssql postgres" hidden>
+        <label class="field">
+          <span>既定データベース</span>
+          <input name="database" placeholder="接続後に切り替えできます">
+        </label>
+        <label class="field" data-for="mssql" hidden>
+          <span>名前付きインスタンス</span>
+          <input name="instanceName" placeholder="SQLEXPRESS (任意)">
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label class="field">
+          <span>ユーザー名 <em>*</em></span>
+          <input name="username" required>
+        </label>
+        <label class="field">
+          <span>パスワード</span>
+          <input name="password" type="password" id="passwordInput" placeholder="保存時に暗号化されます">
+          <small class="hint" id="passwordHint" hidden>空欄なら既存のパスワードを保持します</small>
+        </label>
+      </div>
+
+      <div class="form-row checks">
+        <label class="check" data-for="mssql" hidden>
+          <input type="checkbox" name="encrypt" checked> 接続を暗号化 (encrypt)
+        </label>
+        <label class="check" data-for="mssql" hidden>
+          <input type="checkbox" name="trustServerCertificate" checked> サーバー証明書を信頼
+        </label>
+        <label class="check" data-for="postgres" hidden>
+          <input type="checkbox" name="ssl"> SSL を使用
+        </label>
+      </div>
+
+      <p class="section-label">安全設定</p>
+
+      <label class="check emphasis">
+        <input type="checkbox" name="readOnly" id="readOnlyInput" checked>
+        読み取り専用（データの追加・修正・削除を禁止する）
+      </label>
+
+      <div class="notice" id="readOnlyNotice">
+        <strong>読み取り専用（推奨）</strong>：参照だけを行います。この接続からはデータを一切変更できません。
+        移行元のサーバーは、この設定のままにしておくことを強く推奨します。
+      </div>
+
+      <label class="field">
+        <span>メモ</span>
+        <input name="note" placeholder="用途や注意点など">
+      </label>
+
+      <p class="form-message" id="connFormMessage"></p>
+
+      <div class="modal-actions">
+        <button type="button" class="btn" id="btnTestConnection">接続テスト</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btnCancelConn">キャンセル</button>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== 行エディタ (追加・修正) ===== -->
+<div class="modal-backdrop" id="rowModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rowModalTitle">
+    <h2 id="rowModalTitle">行の編集</h2>
+    <p class="detail-sub" id="rowModalSub"></p>
+    <div class="editor-grid" id="rowEditor"></div>
+    <p class="form-message" id="rowFormMessage"></p>
+    <div class="modal-actions">
+      <span class="muted" id="rowChangeCount"></span>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="btnCancelRow">キャンセル</button>
+      <button type="button" class="btn btn-write" id="btnSubmitRow">確認へ進む</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 実行前の確認 ===== -->
+<div class="modal-backdrop" id="confirmModal" hidden>
+  <div class="modal modal-narrow" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <h2 id="confirmTitle">実行の確認</h2>
+    <div id="confirmBody"></div>
+    <p class="section-label">実行される SQL</p>
+    <pre class="sql-confirm" id="confirmSql"></pre>
+    <p class="form-message" id="confirmMessage"></p>
+    <div class="modal-actions">
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="btnCancelConfirm">キャンセル</button>
+      <button type="button" class="btn btn-write" id="btnRunConfirm">実行する</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 操作履歴 ===== -->
+<div class="modal-backdrop" id="auditModal" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="auditTitle">
+    <h2 id="auditTitle">更新操作の履歴</h2>
+    <p class="detail-sub">このツールから実行された更新操作の記録です (data/audit.log)。</p>
+    <div class="audit-list" id="auditList"></div>
+    <div class="modal-actions">
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="btnCloseAudit">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
