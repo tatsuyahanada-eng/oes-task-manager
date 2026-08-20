@@ -1,0 +1,33 @@
+#!/bin/bash
+# 起動スクリプトのひな形。
+#   cp start.sh.example start.sh && chmod 700 start.sh
+# として、値を埋めてから使ってください。
+# パスワードを書き込むため、パーミッションは必ず 700 にしてください。
+
+cd "$(dirname "$0")"
+
+export PORT=3000
+
+# --- 待ち受けアドレス ---
+# リバースプロキシ (nginx / Apache) 経由で公開する場合は 127.0.0.1 のままにします。
+# プロキシを使わず直接公開する場合のみ 0.0.0.0 にしてください。
+export DBM_HOST=127.0.0.1
+
+# --- 認証 ---
+# DBM_HOST が 127.0.0.1 以外のときは必須です (未設定だと起動を拒否します)。
+# パスワード生成:
+#   node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"
+# export DBM_AUTH_USER='dbadmin'
+# export DBM_AUTH_PASS=''
+
+# --- 接続情報の暗号鍵 ---
+# 未設定なら data/.masterkey が自動生成されます。
+# 明示しておくと、data/.masterkey に依存せず環境を移せます。
+# 鍵生成:
+#   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# export DBM_MASTER_KEY=''
+
+# --- 接続を保持するアイドル時間 (ミリ秒) ---
+# export DBM_IDLE_TIMEOUT_MS=600000
+
+exec node server.js

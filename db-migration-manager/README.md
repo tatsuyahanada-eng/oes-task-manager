@@ -59,6 +59,8 @@ npm start
 PORT=8080 npm start
 ```
 
+サーバに設置する場合は **[DEPLOY.md](DEPLOY.md)** を参照してください。
+
 ### ドライバを絞りたい場合
 
 3 つの DB ドライバは `optionalDependencies` なので、インストールに失敗しても他は動きます。未導入のドライバは画面の「DB 種別」プルダウンで選択できない状態で表示されます。特定の DB だけ使う場合は個別に入れてください。
@@ -112,9 +114,12 @@ npm install pg          # PostgreSQL だけ使う場合
 
 このツールは DB の認証情報を扱うため、次の方針で作っています。
 
-**待ち受けは localhost のみ**
-既定で `127.0.0.1` にのみバインドします。外部に公開しないでください
-（どうしても必要な場合のみ `DBM_HOST=0.0.0.0`。その場合はネットワーク側でアクセス制限してください）。
+**待ち受けは localhost のみ / 公開時は認証を強制**
+既定で `127.0.0.1` にのみバインドします。
+`DBM_HOST` を localhost 以外に設定した場合、`DBM_AUTH_USER` と `DBM_AUTH_PASS` (16 文字以上) が
+無ければ**サーバは起動を拒否します**。認証なしで外部公開されることを防ぐためです。
+認証情報を設定すると、画面・API・静的ファイルのすべてが Basic 認証で保護されます。
+Basic 認証は平文で流れるため、公開時は必ず HTTPS 経由で使ってください。
 
 **パスワードは暗号化して保存**
 接続情報は `data/connections.json` に保存され、パスワードは AES-256-GCM で暗号化されます。API のレスポンスにパスワードは含まれません (`hasPassword` の真偽値のみ)。
@@ -145,6 +150,10 @@ npm install pg          # PostgreSQL だけ使う場合
 **DDL (`CREATE` / `DROP` / `ALTER` / `TRUNCATE`) は常に拒否**します。
 複数ステートメント (`;` 区切り) と、コメントで隠した更新文も拒否します。
 
+**`WHERE` 句の無い `UPDATE` / `DELETE`**
+テーブルの全行が対象になるため、通常の確認とは別に「全行が対象になることを理解しました」への
+チェックを必須にしています。チェックが無い要求はサーバー側で拒否します。
+
 **更新操作の記録**
 成功した更新操作は `data/audit.log` に JSON Lines で追記され、画面の「履歴」から確認できます。
 
@@ -165,6 +174,8 @@ DB ユーザーの権限がそのまま効くので、**移行元には参照専
 | `PORT` | `3000` | 待ち受けポート |
 | `DBM_HOST` | `127.0.0.1` | 待ち受けアドレス |
 | `DBM_MASTER_KEY` | (なし) | パスワード暗号鍵。未設定なら `data/.masterkey` を自動生成 |
+| `DBM_AUTH_USER` | (なし) | Basic 認証のユーザー名。localhost 以外で待ち受ける場合は必須 |
+| `DBM_AUTH_PASS` | (なし) | Basic 認証のパスワード。公開時は 16 文字以上が必須 |
 | `DBM_IDLE_TIMEOUT_MS` | `600000` | 接続を保持するアイドル時間 (既定 10 分) |
 
 ---
@@ -173,7 +184,10 @@ DB ユーザーの権限がそのまま効くので、**移行元には参照専
 
 ```
 server.js               Express アプリのエントリポイント
+start.sh.example        起動スクリプトのひな形 (サーバ設置用)
+DEPLOY.md               レンタルサーバへの設置手順
 src/
+  auth.js               Basic 認証と、公開時の起動ポリシー検査
   crypto.js             パスワードの暗号化・復号 (AES-256-GCM)
   store.js              接続プロファイルの永続化と検証
   pool.js               接続のキャッシュとアイドル切断
@@ -224,7 +238,7 @@ data/                   接続情報・暗号鍵・操作履歴 (gitignore 済�
 | `POST` | `/api/db/:id/tables/:schema/:table/rows` | 行の追加 |
 | `PATCH` | `/api/db/:id/tables/:schema/:table/rows` | 行の修正 (主キー指定・1 行のみ) |
 | `DELETE` | `/api/db/:id/tables/:schema/:table/rows` | 行の削除 (主キー指定・1 行のみ) |
-| `POST` | `/api/db/:id/execute` | 更新系 SQL の実行 (`confirm: true` が必須) |
+| `POST` | `/api/db/:id/execute` | 更新系 SQL の実行 (`confirm: true` が必須。`WHERE` 無しなら `confirmAllRows: true` も必須) |
 | `GET` | `/api/db/:id/audit` | 更新操作の履歴 |
 
 更新系はすべて、接続が書き込み可でなければ HTTP 403 を返します。

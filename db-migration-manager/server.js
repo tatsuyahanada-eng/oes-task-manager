@@ -6,12 +6,27 @@ const express = require('express');
 const connectionsRouter = require('./src/routes/connections');
 const browseRouter = require('./src/routes/browse');
 const writeRouter = require('./src/routes/write');
+const auth = require('./src/auth');
 const pool = require('./src/pool');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 // 既定では localhost のみで待ち受ける。DB 認証情報を扱うため外部公開はしない。
 const HOST = process.env.DBM_HOST || '127.0.0.1';
+const AUTH_USER = process.env.DBM_AUTH_USER || '';
+const AUTH_PASS = process.env.DBM_AUTH_PASS || '';
+
+// localhost 以外にバインドするなら認証を必須にする
+const policy = auth.checkStartupPolicy(HOST, AUTH_USER, AUTH_PASS);
+if (!policy.ok) {
+  console.error('\n起動を中止しました。\n');
+  console.error(policy.message);
+  console.error('');
+  process.exit(1);
+}
+
+// 静的ファイルより先に認証を通す (画面自体も保護する)
+app.use(auth.middleware(AUTH_USER, AUTH_PASS));
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -43,6 +58,10 @@ app.use((err, req, res, next) => {
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`db-migration-manager: http://${HOST}:${PORT}`);
+  console.log(`  認証: ${policy.enabled ? `有効 (ユーザー ${AUTH_USER})` : '無効 (localhost 専用)'}`);
+  if (!auth.isLoopback(HOST)) {
+    console.log('  注意: 外部公開しています。HTTPS 経由でのみアクセスしてください。');
+  }
 });
 
 server.on('error', (err) => {

@@ -96,6 +96,20 @@ function assertSingleStatement(sql) {
 }
 
 /**
+ * WHERE 句を持たない UPDATE / DELETE かどうか。
+ * 全行が対象になるため、実行前に別枠の確認を求める。
+ */
+function isUnqualifiedWrite(sql) {
+  const stripped = String(sql || '')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/--[^\r\n]*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!/^(update|delete)\b/i.test(stripped)) return false;
+  return !/\bwhere\b/i.test(stripped);
+}
+
+/**
  * 更新対象の行を特定するキーを検証する。
  * 主キーが無いテーブルは行を一意に特定できないため、編集を許可しない。
  */
@@ -120,6 +134,7 @@ function normalizeInputValue(field) {
 
 module.exports = {
   classifyStatement,
+  isUnqualifiedWrite,
   assertSingleStatement,
   assertRowKey,
   normalizeInputValue,

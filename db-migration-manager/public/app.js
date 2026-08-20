@@ -899,8 +899,19 @@ function confirmDeleteRow(index) {
  * 実行前の確認ダイアログ
  * ---------------------------------------------------------- */
 
-function openConfirm({ title, danger, body, sql, run, done }) {
-  state.pendingAction = { run, done };
+/** WHERE 句を持たない UPDATE / DELETE か (画面側の判定。最終判定はサーバー側)。 */
+function looksUnqualifiedWrite(sql) {
+  const stripped = String(sql || '')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/--[^\r\n]*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!/^(update|delete)\b/i.test(stripped)) return false;
+  return !/\bwhere\b/i.test(stripped);
+}
+
+function openConfirm({ title, danger, body, sql, run, done, requireAllRows = false }) {
+  state.pendingAction = { run, done, requireAllRows };
   $('#confirmTitle').textContent = title;
   $('#confirmTitle').className = danger ? 'danger' : '';
   $('#confirmBody').innerHTML = body;
@@ -909,9 +920,18 @@ function openConfirm({ title, danger, body, sql, run, done }) {
   $('#confirmMessage').className = 'form-message';
   $('#btnRunConfirm').className = danger ? 'btn btn-danger' : 'btn btn-write';
   $('#btnRunConfirm').textContent = danger ? '削除する' : '実行する';
-  $('#btnRunConfirm').disabled = false;
+
+  // WHERE の無い更新は、追加の同意チェックを入れるまで実行できない
+  $('#confirmAllRows').checked = false;
+  $('#confirmAllRowsWrap').hidden = !requireAllRows;
+  $('#btnRunConfirm').disabled = requireAllRows;
+
   $('#confirmModal').hidden = false;
 }
+
+$('#confirmAllRows').addEventListener('change', (ev) => {
+  $('#btnRunConfirm').disabled = !ev.target.checked;
+});
 
 $('#btnCancelConfirm').addEventListener('click', () => { $('#confirmModal').hidden = true; state.pendingAction = null; });
 
@@ -978,19 +998,30 @@ $('#btnRunSql').addEventListener('click', async () => {
   }
 
   // 更新系は必ず確認を挟む
+  const unqualified = looksUnqualifiedWrite(sql);
   openConfirm({
     title: '更新系 SQL の実行',
     danger: true,
-    body: `<div class="notice danger"><strong>影響範囲を確認してください。</strong><br>
+    body: `${unqualified
+        ? `<div class="notice danger"><strong>WHERE 句がありません。</strong><br>
+             この SQL はテーブルの<strong>全行</strong>が対象になります。実行すると元に戻せません。</div>`
+        : ''}
+           <div class="notice danger"><strong>影響範囲を確認してください。</strong><br>
              更新系 SQL は WHERE の指定次第で多数の行に影響します。トランザクション内で実行し、
              エラー時は自動的にロールバックしますが、成功した場合はコミットされます。</div>
            <div class="notice">接続: <strong>${esc(activeConnection().name)}</strong>${
              state.database ? ` / db=${esc(state.database)}` : ''
            }</div>`,
     sql,
+    requireAllRows: unqualified,
     run: () => api(`/api/db/${state.activeConnectionId}/execute`, {
       method: 'POST',
-      body: { database: state.database, sql, confirm: true },
+      body: {
+        database: state.database,
+        sql,
+        confirm: true,
+        confirmAllRows: unqualified ? true : undefined,
+      },
     }),
     done: 'SQL を実行しました',
   });

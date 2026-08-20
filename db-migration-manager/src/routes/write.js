@@ -13,7 +13,13 @@ const express = require('express');
 const pool = require('../pool');
 const store = require('../store');
 const audit = require('../audit');
-const { assertRowKey, normalizeInputValue, classifyStatement, badRequest } = require('../drivers/util');
+const {
+  assertRowKey,
+  normalizeInputValue,
+  classifyStatement,
+  isUnqualifiedWrite,
+  badRequest,
+} = require('../drivers/util');
 
 const router = express.Router({ mergeParams: true });
 
@@ -199,6 +205,14 @@ router.post('/execute', wrap(async (req, res) => {
   }
   // 画面側の確認ダイアログを通っていない要求は受け付けない
   if (confirm !== true) throw badRequest('実行前の確認が行われていません。');
+
+  // WHERE の無い UPDATE / DELETE は全行が対象になる。別枠の同意を必須にする。
+  if (isUnqualifiedWrite(sql) && req.body.confirmAllRows !== true) {
+    throw badRequest(
+      'WHERE 句がありません。この SQL はテーブルの全行が対象になります。' +
+        '本当に実行する場合は、確認画面で全行操作への同意にチェックを入れてください。'
+    );
+  }
 
   const s = await session(req);
   await s.driver.begin(s.client);
