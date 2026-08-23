@@ -1,0 +1,6 @@
+node_modules/
+data/connections.json
+data/.masterkey
+data/audit.log
+*.log
+.DS_Store

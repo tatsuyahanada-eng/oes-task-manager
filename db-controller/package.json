@@ -1,0 +1,21 @@
+{
+  "name": "db-controller",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DB Controller - Oracle / SQL Server / PostgreSQL 対応の DB 管理 PWA",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "optionalDependencies": {
+    "mssql": "^11.0.1",
+    "oracledb": "^6.8.0",
+    "pg": "^8.13.1"
+  }
+}
