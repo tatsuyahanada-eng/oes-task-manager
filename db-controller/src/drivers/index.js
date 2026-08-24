@@ -30,6 +30,8 @@ function driverCatalog() {
     defaultPort: d.defaultPort,
     supportsDatabaseSwitch: d.supportsDatabaseSwitch,
     installed: isInstalled(d.id),
+    // 未導入のとき、画面と起動ログで「どうすれば使えるか」を出すために返す
+    module: MODULE_BY_DRIVER[d.id],
   }));
 }
 

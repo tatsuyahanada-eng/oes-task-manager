@@ -17,6 +17,7 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 
 const state = {
   drivers: [],
+  me: null,
   servers: [],
   view: 'tree',
   /** ツリーの展開状態 key -> bool */
@@ -80,8 +81,13 @@ function dbPath(serverId, suffix, params = {}) {
 }
 
 const serverById = (id) => state.servers.find((s) => s.id === id) || null;
+/**
+ * この接続でデータを変更できるか。
+ * 接続が書き込み可であることと、ログイン中の利用者が運用者以上であることの両方が要る。
+ */
 const canWrite = (id) => {
   const s = serverById(id);
+  if (!state.me || !state.me.canWrite) return false;
   return Boolean(s && s.readOnly === false);
 };
 
@@ -152,8 +158,12 @@ function updateBadges() {
     return;
   }
   const w = canWrite(id);
+  const byRole = state.me && !state.me.canWrite;
   badge.hidden = false;
-  badge.textContent = w ? '書込可' : '読取専用';
+  badge.textContent = w ? '書込可' : (byRole ? '読取専用（権限）' : '読取専用');
+  badge.title = byRole
+    ? `ログイン中の権限（${state.me.roleLabel || state.me.role}）ではデータを変更できません。`
+    : '';
   badge.className = `mode-badge ${w ? 'is-writable' : ''}`;
 
   const editable = w && state.detail && state.detail.primaryKey.length
@@ -732,8 +742,9 @@ function confirmDelete(index) {
 
 /* ---------- 実行確認 ---------- */
 
-function openConfirm({ title, danger, body, sql, run, done, requireAllRows = false }) {
-  state.pending = { run, done };
+function openConfirm({ title, danger, body, sql, run, done, after, requireAllRows = false }) {
+  // after を渡すと、成功後の後始末をそれに差し替える (既定は行の読み直し)
+  state.pending = { run, done, after };
   $('#confirmTitle').textContent = title;
   $('#confirmBody').innerHTML = body;
   $('#confirmSql').textContent = sql;
@@ -763,10 +774,11 @@ $('#btnRunConfirm').addEventListener('click', async () => {
     const msg = state.pending.done + (n !== undefined ? `（${num(n)} 行）` : '');
     // 操作が完了したので、開いているシートはすべて閉じる
     $$('.sheet-backdrop').forEach((b) => { b.hidden = true; });
+    const after = state.pending.after;
     state.pending = null;
     state.editing = null;
     toast(msg, 'ok');
-    await loadRows();
+    await (after ? after() : loadRows());
   } catch (err) {
     $('#confirmMessage').className = 'form-message err';
     $('#confirmMessage').textContent = err.message;
@@ -1097,6 +1109,18 @@ function applyTypeVisibility() {
     el.hidden = !el.dataset.for.split(' ').includes(type);
   });
   const d = state.drivers.find((x) => x.id === type);
+  const hint = $('#driverHint');
+  const missing = state.drivers.filter((x) => !x.installed);
+  if (missing.length) {
+    // なぜ選べないのか、どうすれば使えるのかを、その場で伝える
+    hint.hidden = false;
+    hint.innerHTML = missing
+      .map((x) => `<strong>${esc(x.label)}</strong> は未導入です。サーバで <code>npm install ${esc(x.module)}</code> を実行し、DB Controller を再起動してください。`)
+      .join('<br>');
+  } else {
+    hint.hidden = true;
+    hint.textContent = '';
+  }
   if (d) {
     form.elements.port.placeholder = `既定 ${d.defaultPort}`;
     // 別の DB 種別の既定ポートが残っていたら、選び直した種別のものに合わせる
@@ -1231,12 +1255,34 @@ document.addEventListener('keydown', (ev) => {
 
 async function loadAccount() {
   const me = await api('/api/auth/me');
+  state.me = me;
   $('#userChip').hidden = false;
   $('#userName').textContent = me.username;
   $('#settingsUser').textContent = me.username;
+  $('#settingsRole').textContent = me.roleLabel || me.role;
   $('#settingsIdle').textContent = `${me.idleTimeoutMinutes} 分の無操作でログアウト`;
   $('#defaultPwBanner').hidden = !me.isDefaultPassword;
+  applyPermissions();
   return me;
+}
+
+/**
+ * ログイン中の役割に合わせて、押せないボタンを隠す。
+ * 画面を隠すだけでは守りにならないので、サーバ側でも同じ制限をかけている。
+ */
+function applyPermissions() {
+  const me = state.me || {};
+  const admin = Boolean(me.canManageUsers);
+  const write = Boolean(me.canWrite);
+
+  // 接続先の追加・編集は管理者だけ
+  $$('#btnAddServer, #btnAddServerFromTree, #btnFirstServer').forEach((b) => { b.hidden = !admin; });
+  $('#usersBlock').hidden = !admin;
+  $('#btnAudit').hidden = !admin;
+
+  // データの変更は運用者以上
+  $$('[data-needs="write"]').forEach((b) => { b.hidden = !write; });
+  document.body.classList.toggle('is-readonly-user', !write);
 }
 
 async function doLogout() {
@@ -1544,6 +1590,120 @@ $('#btnInstall').addEventListener('click', async () => {
 });
 
 /* ============================================================
+ * 利用者の管理（管理者のみ）
+ * ========================================================== */
+
+const ROLE_ORDER = ['admin', 'operator', 'viewer'];
+
+async function loadUsers() {
+  if (!state.me || !state.me.canManageUsers) return;
+  try {
+    const { users } = await api('/api/auth/users');
+    renderUsers(users);
+  } catch (err) {
+    $('#userList').innerHTML = `<p class="hint">利用者を読み込めませんでした: ${esc(err.message)}</p>`;
+  }
+}
+
+function renderUsers(list) {
+  const meName = (state.me && state.me.username) || '';
+  $('#userList').innerHTML = list.map((u) => {
+    const isMe = u.username.toLowerCase() === meName.toLowerCase();
+    const flags = [];
+    if (u.disabled) flags.push('<span class="badge badge-off">利用停止</span>');
+    if (u.isDefaultPassword) flags.push('<span class="badge badge-warn">初期パスワード</span>');
+    if (isMe) flags.push('<span class="badge">自分</span>');
+    const last = u.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString('ja-JP') : '未ログイン';
+    return `<div class="user-card${u.disabled ? ' is-off' : ''}" data-user="${esc(u.username)}">
+      <div class="user-main">
+        <div class="user-name">${esc(u.username)} ${flags.join(' ')}</div>
+        <div class="user-sub">${esc(u.roleLabel)} ・ 最終ログイン: ${esc(last)}</div>
+      </div>
+      <div class="user-ops">
+        <select data-act="role"${isMe ? ' disabled' : ''}>
+          ${ROLE_ORDER.map((r) => `<option value="${r}"${u.role === r ? ' selected' : ''}>${roleLabel(r)}</option>`).join('')}
+        </select>
+        <button class="btn btn-sm" data-act="reset">パスワード再設定</button>
+        <button class="btn btn-sm" data-act="toggle"${isMe ? ' disabled' : ''}>${u.disabled ? '利用再開' : '利用停止'}</button>
+        <button class="btn btn-sm btn-danger" data-act="remove"${isMe ? ' disabled' : ''}>削除</button>
+      </div>
+    </div>`;
+  }).join('') || '<p class="hint">利用者がいません。</p>';
+}
+
+function roleLabel(id) {
+  const d = { admin: '管理者', operator: '運用者', viewer: '閲覧者' };
+  return d[id] || id;
+}
+
+$('#btnAddUser')?.addEventListener('click', async () => {
+  const username = prompt('追加する利用者のユーザー名（英数字と . _ -、3〜32文字）');
+  if (!username) return;
+  const role = prompt('役割を入力してください: admin / operator / viewer', 'viewer');
+  if (!role) return;
+  const password = prompt('初期パスワード（10文字以上・英大小文字と数字を含む）');
+  if (!password) return;
+  try {
+    await api('/api/auth/users', { method: 'POST', body: { username, role, password } });
+    toast(`${username} を追加しました。`, 'ok');
+    await loadUsers();
+  } catch (err) { toast(err.message, 'err'); }
+});
+
+$('#userList')?.addEventListener('change', async (ev) => {
+  const sel = ev.target.closest('select[data-act="role"]');
+  if (!sel) return;
+  const username = sel.closest('.user-card').dataset.user;
+  try {
+    await api(`/api/auth/users/${encodeURIComponent(username)}`, {
+      method: 'PUT', body: { role: sel.value },
+    });
+    toast(`${username} の役割を「${roleLabel(sel.value)}」にしました。`, 'ok');
+  } catch (err) { toast(err.message, 'err'); }
+  await loadUsers();
+});
+
+$('#userList')?.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('button[data-act]');
+  if (!btn) return;
+  const card = btn.closest('.user-card');
+  const username = card.dataset.user;
+  const act = btn.dataset.act;
+
+  try {
+    if (act === 'reset') {
+      const newPassword = prompt(`${username} の新しいパスワード（10文字以上・英大小文字と数字を含む）`);
+      if (!newPassword) return;
+      const r = await api(`/api/auth/users/${encodeURIComponent(username)}/password`, {
+        method: 'POST', body: { newPassword },
+      });
+      toast(r.message, 'ok');
+    } else if (act === 'toggle') {
+      const off = card.classList.contains('is-off');
+      await api(`/api/auth/users/${encodeURIComponent(username)}`, {
+        method: 'PUT', body: { disabled: !off },
+      });
+      toast(off ? `${username} の利用を再開しました。` : `${username} を利用停止にしました。`, 'ok');
+    } else if (act === 'remove') {
+      openConfirm({
+        title: '利用者を削除',
+        danger: true,
+        body: `<div class="notice danger"><strong>この操作は取り消せません。</strong><br>
+          <strong>${esc(username)}</strong> を削除します。この利用者はログインできなくなります。</div>
+          <p class="hint">開いているセッションもその場で無効になります。
+          接続先の登録や、これまでの操作履歴は残ります。</p>`,
+        sql: `-- 利用者 ${username} を data/auth.json から削除します\n-- DB のデータには一切触れません`,
+        run: () => api(`/api/auth/users/${encodeURIComponent(username)}`, { method: 'DELETE' }),
+        done: `${username} を削除しました`,
+        after: loadUsers,
+      });
+      return;
+    }
+  } catch (err) { toast(err.message, 'err'); }
+  await loadUsers();
+});
+
+/* ============================================================
  * 起動
  * ========================================================== */
 
@@ -1556,6 +1716,7 @@ $('#btnInstall').addEventListener('click', async () => {
       .map((d) => `<option value="${d.id}"${d.installed ? '' : ' disabled'}>${d.label}${d.installed ? '' : '（未導入）'}</option>`)
       .join('');
     await loadServers();
+    await loadUsers();
     setView('tree');
     cout('DB Controller — \\help でコマンド一覧', 'c-info');
     if (!state.servers.length) cout('サーバが未登録です。設定タブから追加してください。', 'c-info');

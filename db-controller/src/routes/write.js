@@ -3,6 +3,7 @@
 /**
  * 更新系 API。安全側に倒すため、次の条件をすべて満たさなければ実行しない。
  *
+ *  0. ログイン中の利用者が「運用者」以上であること (閲覧者は変更できない)
  *  1. 接続プロファイルが読み取り専用でないこと (既定は読み取り専用)
  *  2. 対象テーブルに主キーがあること (行を一意に特定できること)
  *  3. トランザクション内で実行し、影響行数がちょうど 1 行であること
@@ -13,6 +14,7 @@ const express = require('express');
 const pool = require('../pool');
 const store = require('../store');
 const audit = require('../audit');
+const auth = require('../session');
 const {
   assertRowKey,
   normalizeInputValue,
@@ -24,6 +26,12 @@ const {
 const router = express.Router({ mergeParams: true });
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
+
+/**
+ * このルータの更新系はすべて「運用者」以上に限る。
+ * 閲覧者は接続が書き込み可であっても、ここから先へは進めない。
+ */
+const canWrite = auth.requireRole('operator');
 
 /** 読み取り専用の接続では更新系を一切通さない。 */
 function assertWritable(connectionId) {
@@ -95,7 +103,7 @@ async function primaryKeyOf(s, schema, table) {
 
 /* ---------------- 行の追加 ---------------- */
 
-router.post('/tables/:schema/:table/rows', wrap(async (req, res) => {
+router.post('/tables/:schema/:table/rows', canWrite, wrap(async (req, res) => {
   const conn = assertWritable(req.params.connectionId);
   const { schema, table } = req.params;
   const s = await session(req);
@@ -113,6 +121,7 @@ router.post('/tables/:schema/:table/rows', wrap(async (req, res) => {
 
   audit.record({
     action: 'insert',
+    user: req.session.username,
     connection: conn.name,
     type: conn.type,
     database: s.database,
@@ -125,7 +134,7 @@ router.post('/tables/:schema/:table/rows', wrap(async (req, res) => {
 
 /* ---------------- 行の更新 ---------------- */
 
-router.patch('/tables/:schema/:table/rows', wrap(async (req, res) => {
+router.patch('/tables/:schema/:table/rows', canWrite, wrap(async (req, res) => {
   const conn = assertWritable(req.params.connectionId);
   const { schema, table } = req.params;
   const s = await session(req);
@@ -145,6 +154,7 @@ router.patch('/tables/:schema/:table/rows', wrap(async (req, res) => {
 
   audit.record({
     action: 'update',
+    user: req.session.username,
     connection: conn.name,
     type: conn.type,
     database: s.database,
@@ -159,7 +169,7 @@ router.patch('/tables/:schema/:table/rows', wrap(async (req, res) => {
 
 /* ---------------- 行の削除 ---------------- */
 
-router.delete('/tables/:schema/:table/rows', wrap(async (req, res) => {
+router.delete('/tables/:schema/:table/rows', canWrite, wrap(async (req, res) => {
   const conn = assertWritable(req.params.connectionId);
   const { schema, table } = req.params;
   const s = await session(req);
@@ -176,6 +186,7 @@ router.delete('/tables/:schema/:table/rows', wrap(async (req, res) => {
 
   audit.record({
     action: 'delete',
+    user: req.session.username,
     connection: conn.name,
     type: conn.type,
     database: s.database,
@@ -189,7 +200,7 @@ router.delete('/tables/:schema/:table/rows', wrap(async (req, res) => {
 
 /* ---------------- 更新系 SQL の実行 ---------------- */
 
-router.post('/execute', wrap(async (req, res) => {
+router.post('/execute', canWrite, wrap(async (req, res) => {
   const conn = assertWritable(req.params.connectionId);
   const { sql, confirm } = req.body || {};
 
@@ -227,6 +238,7 @@ router.post('/execute', wrap(async (req, res) => {
 
   audit.record({
     action: 'execute',
+    user: req.session.username,
     connection: conn.name,
     type: conn.type,
     database: s.database,

@@ -133,11 +133,25 @@
       <h3>アカウント</h3>
       <dl>
         <dt>ログイン中</dt><dd id="settingsUser">-</dd>
+        <dt>権限</dt><dd id="settingsRole">-</dd>
         <dt>自動ログアウト</dt><dd id="settingsIdle">-</dd>
       </dl>
       <div class="settings-actions">
         <button class="btn btn-sm" id="btnChangePw">パスワードを変更</button>
         <button class="btn btn-sm" id="btnLogout2">ログアウト</button>
+      </div>
+
+      <div id="usersBlock" hidden>
+        <h3>
+          利用者
+          <button class="btn btn-sm btn-primary" id="btnAddUser">+ 利用者を追加</button>
+        </h3>
+        <div class="user-list" id="userList"></div>
+        <p class="hint">
+          <strong>管理者</strong>… 利用者と接続先の管理、データの変更 /
+          <strong>運用者</strong>… データの参照と変更 /
+          <strong>閲覧者</strong>… 参照と CSV 書き出しのみ
+        </p>
       </div>
 
       <h3>このアプリについて</h3>
@@ -177,6 +191,7 @@
         <label class="field">
           <span>DB種別 <em>*</em></span>
           <select name="type" id="typeSelect" required></select>
+          <small class="field-hint" id="driverHint" hidden></small>
         </label>
         <label class="field field-narrow">
           <span>用途</span>

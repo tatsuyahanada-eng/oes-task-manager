@@ -22,6 +22,7 @@ const audit = require('../audit');
 const csv = require('../csv');
 const { ZipBuilder } = require('../zip');
 const { badRequest, assertIdentifier } = require('../drivers/util');
+const auth = require('../session');
 
 const router = express.Router({ mergeParams: true });
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -294,7 +295,7 @@ async function analyze(req, s) {
 }
 
 /** 取り込み前の確認。実際には書き込まない。 */
-router.post('/import/preview', rawCsv, wrap(async (req, res) => {
+router.post('/import/preview', auth.requireRole('operator'), rawCsv, wrap(async (req, res) => {
   const s = await session(req);
   const a = await analyze(req, s);
 
@@ -335,7 +336,7 @@ router.post('/import/preview', rawCsv, wrap(async (req, res) => {
 }));
 
 /** 取り込みの実行。全件を 1 つのトランザクションで行う。 */
-router.post('/import/execute', rawCsv, wrap(async (req, res) => {
+router.post('/import/execute', auth.requireRole('operator'), rawCsv, wrap(async (req, res) => {
   const conn = assertWritable(req.params.connectionId);
   if (req.query.confirm !== 'true') throw badRequest('実行前の確認が行われていません。');
 
@@ -385,6 +386,7 @@ router.post('/import/execute', rawCsv, wrap(async (req, res) => {
 
   audit.record({
     action: 'import',
+    user: req.session.username,
     connection: conn.name,
     type: conn.type,
     database: s.database,

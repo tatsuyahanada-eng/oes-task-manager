@@ -4,8 +4,16 @@ const express = require('express');
 const store = require('../store');
 const pool = require('../pool');
 const { driverCatalog, getDriver } = require('../drivers');
+const session = require('../session');
+const audit = require('../audit');
 
 const router = express.Router();
+
+/**
+ * 接続先の登録内容は「どの DB に、どの資格情報でつなぐか」そのもの。
+ * 参照は全員に許すが、追加・変更・削除は管理者だけに限る。
+ */
+const adminOnly = session.requireRole('admin');
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
@@ -25,21 +33,37 @@ router.get('/:id', (req, res) => {
   res.json({ connection: conn });
 });
 
-router.post('/', wrap(async (req, res) => {
+router.post('/', adminOnly, wrap(async (req, res) => {
   const created = store.create(req.body || {});
+  audit.record({
+    action: 'conn-create', user: req.session.username,
+    connection: created.name, target: `${created.type} ${created.host}:${created.port}`,
+    sql: `接続先を追加 (読み取り専用: ${created.readOnly !== false})`,
+  });
   res.status(201).json({ connection: created });
 }));
 
-router.put('/:id', wrap(async (req, res) => {
+router.put('/:id', adminOnly, wrap(async (req, res) => {
   const updated = store.update(req.params.id, req.body || {});
   // 設定が変わったので既存の接続は張り直す
   await pool.releaseAll(req.params.id);
+  audit.record({
+    action: 'conn-update', user: req.session.username,
+    connection: updated.name, target: `${updated.type} ${updated.host}:${updated.port}`,
+    sql: `接続先を変更 (読み取り専用: ${updated.readOnly !== false})`,
+  });
   res.json({ connection: updated });
 }));
 
-router.delete('/:id', wrap(async (req, res) => {
+router.delete('/:id', adminOnly, wrap(async (req, res) => {
+  const conn = store.get(req.params.id);
   await pool.releaseAll(req.params.id);
   store.remove(req.params.id);
+  audit.record({
+    action: 'conn-delete', user: req.session.username,
+    connection: conn ? conn.name : req.params.id, target: '-',
+    sql: '接続先を削除',
+  });
   res.json({ ok: true });
 }));
 
@@ -57,7 +81,7 @@ router.post('/:id/test', wrap(async (req, res) => {
   res.json({ ok: true, elapsedMs: Date.now() - started, info });
 }));
 
-router.post('/test', wrap(async (req, res) => {
+router.post('/test', adminOnly, wrap(async (req, res) => {
   const input = req.body || {};
   const driver = getDriver(input.type);
   const conn = {

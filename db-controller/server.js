@@ -9,6 +9,8 @@ const writeRouter = require('./src/routes/write');
 const csvRouter = require('./src/routes/csv');
 const authRouter = require('./src/routes/auth');
 const session = require('./src/session');
+const users = require('./src/users');
+const drivers = require('./src/drivers');
 const pool = require('./src/pool');
 
 const app = express();
@@ -16,11 +18,11 @@ const PORT = Number(process.env.PORT || 3000);
 // 既定では localhost のみで待ち受ける。DB 認証情報を扱うため外部公開はしない。
 const HOST = process.env.DBC_HOST || '127.0.0.1';
 
-// アカウントを用意する (初回は data/auth.json を作る)
-const account = session.ensureAccount();
+// 利用者を用意する (初回は data/auth.json を作る。旧形式なら新形式へ移す)
+const accounts = users.load();
 
 // 初期パスワードのまま外部公開しようとしていたら止める
-const policy = session.checkStartupPolicy(HOST, account);
+const policy = session.checkStartupPolicy(HOST);
 if (!policy.ok) {
   console.error('\n起動を中止しました。\n');
   console.error(policy.message);
@@ -92,10 +94,24 @@ app.use((err, req, res, next) => {
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`DB Controller: http://${HOST}:${PORT}`);
-  console.log(`  ログイン: 必須（ユーザー ${account.username}）`);
-  if (account.isDefaultPassword) {
+
+  const active = accounts.users.filter((u) => !u.disabled);
+  const admins = active.filter((u) => u.role === 'admin').map((u) => u.username);
+  console.log(`  ログイン: 必須（利用者 ${active.length} 人 / 管理者: ${admins.join(', ')}）`);
+
+  // どの DB につなげる状態かを、起動時にはっきり見せる
+  const cat = drivers.driverCatalog();
+  const ready = cat.filter((d) => d.installed).map((d) => d.label);
+  const missing = cat.filter((d) => !d.installed);
+  console.log(`  使える DB: ${ready.length ? ready.join(' / ') : 'なし'}`);
+  for (const d of missing) {
+    console.log(`  ※ ${d.label} は未導入です。使うには: npm install ${d.module}`);
+  }
+
+  const stale = accounts.users.filter((u) => u.isDefaultPassword && !u.disabled);
+  if (stale.length) {
     console.log('');
-    console.log('  ※ パスワードが初期値のままです。');
+    console.log(`  ※ パスワードが初期値のままの利用者がいます: ${stale.map((u) => u.username).join(', ')}`);
     console.log('     ログイン後、設定画面から変更してください。');
     console.log('     変更するまで、localhost 以外での待ち受けはできません。');
     console.log('');
