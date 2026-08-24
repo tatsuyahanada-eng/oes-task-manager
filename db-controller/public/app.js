@@ -747,9 +747,10 @@ $('#btnRunConfirm').addEventListener('click', async () => {
   b.textContent = '実行中…';
   try {
     const r = await state.pending.run();
-    const msg = state.pending.done + (r && r.affected !== undefined ? `（${r.affected} 行）` : '');
-    $('#confirmModal').hidden = true;
-    $('#rowModal').hidden = true;
+    const n = r && (r.affected !== undefined ? r.affected : r.inserted);
+    const msg = state.pending.done + (n !== undefined ? `（${num(n)} 行）` : '');
+    // 操作が完了したので、開いているシートはすべて閉じる
+    $$('.sheet-backdrop').forEach((b) => { b.hidden = true; });
     state.pending = null;
     state.editing = null;
     toast(msg, 'ok');
@@ -776,6 +777,8 @@ const CUI_HELP = `使えるコマンド:
   \\tables [絞込]       テーブル一覧
   \\d <テーブル>        テーブルの列定義
   \\count <テーブル>    件数を数える
+  \\export <テーブル>   テーブルを CSV で保存
+  \\backup              いまのスキーマを ZIP で保存
   \\clear               画面を消す
 
   上記以外はそのまま SQL として実行します。
@@ -901,6 +904,25 @@ async function runCui(line) {
       coutTable(['列', '型', 'NULL', 'キー'],
         d.columns.map((c) => [c.name, c.dataType, c.nullable ? 'YES' : 'NO', c.isPrimaryKey ? 'PK' : '']));
       return cout(`主キー: ${d.primaryKey.join(', ') || 'なし'}`, 'c-info');
+    }
+
+    case '\\export': {
+      const id = requireServer();
+      if (!arg) throw new Error('テーブル名を指定してください: \\export <テーブル>');
+      if (!state.sel.schema) throw new Error('スキーマが未選択です。');
+      await loadCsvOptions();
+      const qs = csvQuery({ where: '' });
+      download(`/api/db/${id}/tables/${encodeURIComponent(state.sel.schema)}/${encodeURIComponent(arg)}/export.csv?${qs}`);
+      return cout(`${state.sel.schema}.${arg} を CSV で保存しています…`, 'c-ok');
+    }
+
+    case '\\backup': {
+      const id = requireServer();
+      if (!state.sel.schema) throw new Error('スキーマが未選択です。');
+      await loadCsvOptions();
+      const qs = csvQuery({ schema: state.sel.schema });
+      download(`/api/db/${id}/export/schema.zip?${qs}`);
+      return cout(`スキーマ ${state.sel.schema} を ZIP で保存しています…`, 'c-ok');
     }
 
     case '\\count': {
@@ -1183,6 +1205,233 @@ document.addEventListener('keydown', (ev) => {
   if (ev.key !== 'Escape') return;
   const open = $$('.sheet-backdrop').filter((b) => !b.hidden);
   if (open.length) open[open.length - 1].hidden = true;
+});
+
+/* ============================================================
+ * CSV 入出力
+ * ========================================================== */
+
+let csvOptions = null;
+let csvPreviewData = null;
+
+async function loadCsvOptions() {
+  if (csvOptions) return csvOptions;
+  const id = state.sel.serverId || (state.servers[0] && state.servers[0].id);
+  if (!id) return null;
+  csvOptions = await api(`/api/db/${id}/csv/options`);
+  $('#csvEncoding').innerHTML =
+    '<option value="auto">自動判定（取り込み時）</option>' +
+    csvOptions.encodings.map((e) => `<option value="${e.id}">${esc(e.label)}</option>`).join('');
+  $('#csvEncoding').value = 'utf-8';
+  $('#csvDelimiter').innerHTML =
+    '<option value="auto">自動判定（取り込み時）</option>' +
+    csvOptions.delimiters.map((d) => `<option value="${d.id}">${esc(d.label)}</option>`).join('');
+  $('#csvDelimiter').value = 'comma';
+  return csvOptions;
+}
+
+$('#btnCsv').addEventListener('click', async () => {
+  if (!state.sel.serverId) return toast('サーバを選んでください', 'err');
+  await loadCsvOptions();
+
+  const { schema, table, database } = state.sel;
+  $('#csvTarget').textContent = table
+    ? `${schema}.${table.name}${database ? ` / ${database}` : ''}`
+    : `${schema || '(スキーマ未選択)'}${database ? ` / ${database}` : ''}`;
+
+  // 出力・取り込みはテーブルが選ばれていないと使えない
+  const hasTable = Boolean(table);
+  $('#btnExportTable').disabled = !hasTable;
+  $('#btnCsvPreview').disabled = !hasTable;
+  $('#csvUseWhere').checked = Boolean(state.where);
+  $('#csvWhereText').textContent = state.where ? `WHERE ${state.where}` : '（絞り込みなし＝全行）';
+  $('#csvImportReadonly').hidden = canWrite(state.sel.serverId);
+  $('#csvPreview').innerHTML = '';
+  $('#csvImportMessage').textContent = '';
+  $('#btnCsvImport').disabled = true;
+  csvPreviewData = null;
+
+  $('#csvModal').hidden = false;
+  loadBackupInfo();
+});
+
+$('#btnCloseCsv').addEventListener('click', () => { $('#csvModal').hidden = true; });
+
+$$('#csvTabs .seg-btn').forEach((b) => b.addEventListener('click', () => {
+  $$('#csvTabs .seg-btn').forEach((x) => x.classList.toggle('is-active', x === b));
+  $$('.csv-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.csvPanel === b.dataset.csv));
+}));
+
+/** 出力用のクエリ文字列を組み立てる。 */
+function csvQuery(extra = {}) {
+  const q = new URLSearchParams();
+  if (state.sel.database) q.set('database', state.sel.database);
+  const enc = $('#csvEncoding').value;
+  const del = $('#csvDelimiter').value;
+  if (enc && enc !== 'auto') q.set('encoding', enc);
+  if (del && del !== 'auto') q.set('delimiter', del);
+  for (const [k, v] of Object.entries(extra)) {
+    if (v !== undefined && v !== null && v !== '') q.set(k, v);
+  }
+  return q.toString();
+}
+
+/** ブラウザにダウンロードさせる。 */
+function download(url) {
+  const a = document.createElement('a');
+  a.href = url;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+/* ---------- 出力 ---------- */
+
+$('#btnExportTable').addEventListener('click', () => {
+  const { serverId, schema, table } = state.sel;
+  if (!table) return;
+  const where = $('#csvUseWhere').checked ? state.where : '';
+  const qs = csvQuery({ where });
+  download(`/api/db/${serverId}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table.name)}/export.csv?${qs}`);
+  toast('CSV を書き出しています…', 'ok');
+});
+
+/* ---------- 一括バックアップ ---------- */
+
+async function loadBackupInfo() {
+  const { serverId, schema, database } = state.sel;
+  const box = $('#csvBackupInfo');
+  if (!serverId || !schema) { box.textContent = 'スキーマを選んでください。'; $('#btnBackupZip').disabled = true; return; }
+  box.textContent = '対象を確認しています…';
+  $('#btnBackupZip').disabled = true;
+  try {
+    const info = await api(dbPath(serverId, 'export/schema-info', { database, schema }));
+    const rows = info.tables.filter((t) => t.type === 'TABLE')
+      .reduce((sum, t) => sum + (t.estimatedRows || 0), 0);
+    box.innerHTML = `対象: <strong>${info.tableCount}</strong> テーブル` +
+      `（ビュー ${info.viewCount}）／ 概算 <strong>${num(rows)}</strong> 行<br>` +
+      info.tables.map((t) => esc(t.name)).join(', ');
+    $('#btnBackupZip').disabled = info.tableCount === 0;
+  } catch (err) {
+    box.textContent = err.message;
+  }
+}
+
+$('#csvIncludeViews').addEventListener('change', loadBackupInfo);
+
+$('#btnBackupZip').addEventListener('click', () => {
+  const { serverId, schema } = state.sel;
+  if (!schema) return;
+  const qs = csvQuery({ schema, includeViews: $('#csvIncludeViews').checked ? 'true' : '' });
+  download(`/api/db/${serverId}/export/schema.zip?${qs}`);
+  toast('ZIP を作成しています。大きいと時間がかかります…', 'ok');
+});
+
+/* ---------- 取り込み ---------- */
+
+function importQuery(extra = {}) {
+  const { serverId, database, schema, table } = state.sel;
+  const q = new URLSearchParams({ schema, table: table.name });
+  if (database) q.set('database', database);
+  const enc = $('#csvEncoding').value;
+  const del = $('#csvDelimiter').value;
+  if (enc && enc !== 'auto') q.set('encoding', enc);
+  if (del && del !== 'auto') q.set('delimiter', del);
+  q.set('header', $('#csvHasHeader').checked ? 'true' : 'false');
+  q.set('emptyAsNull', $('#csvEmptyAsNull').checked ? 'true' : 'false');
+  for (const [k, v] of Object.entries(extra)) q.set(k, v);
+  return { serverId, qs: q.toString() };
+}
+
+async function postCsv(path, buffer) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/csv' },
+    body: buffer,
+  });
+  const text = await res.text();
+  let payload = {};
+  if (text) { try { payload = JSON.parse(text); } catch { throw new Error(`応答を解釈できません (HTTP ${res.status})`); } }
+  if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+  return payload;
+}
+
+$('#btnCsvPreview').addEventListener('click', async () => {
+  const file = $('#csvFile').files[0];
+  const msg = $('#csvImportMessage');
+  msg.className = 'form-message';
+  if (!file) { msg.className = 'form-message err'; msg.textContent = 'CSV ファイルを選んでください。'; return; }
+  if (!state.sel.table) { msg.className = 'form-message err'; msg.textContent = 'テーブルを選んでください。'; return; }
+
+  msg.textContent = '確認しています…';
+  $('#btnCsvImport').disabled = true;
+  try {
+    const buffer = await file.arrayBuffer();
+    const { serverId, qs } = importQuery();
+    const p = await postCsv(`/api/db/${serverId}/import/preview?${qs}`, buffer);
+    csvPreviewData = { buffer, preview: p };
+    renderCsvPreview(p);
+    msg.textContent = '';
+    $('#btnCsvImport').disabled = !p.canImport || !canWrite(state.sel.serverId);
+  } catch (err) {
+    $('#csvPreview').innerHTML = '';
+    msg.className = 'form-message err';
+    msg.textContent = err.message;
+  }
+});
+
+function renderCsvPreview(p) {
+  const map = p.mapping.map((m) => m.tableColumn
+    ? `<div class="hit">${esc(m.csvColumn)} <span class="arrow">→</span> ${esc(m.tableColumn)}</div>`
+    : `<div class="miss">${esc(m.csvColumn)} <span class="arrow">→</span> （無視）</div>`).join('');
+
+  const head = p.mapping.map((m) => `<th>${esc(m.csvColumn)}</th>`).join('');
+  const body = p.sample.map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join('')}</tr>`).join('');
+
+  $('#csvPreview').innerHTML = `
+    <dl class="csv-summary">
+      <dt>取り込み先</dt><dd>${esc(p.schema)}.${esc(p.table)}</dd>
+      <dt>文字コード</dt><dd>${esc(p.encodingLabel)}</dd>
+      <dt>区切り文字</dt><dd>${p.delimiter === 'tab' ? 'タブ' : esc(p.delimiter)}</dd>
+      <dt>行数</dt><dd>${num(p.totalRows)} 行</dd>
+    </dl>
+    ${p.warnings.map((w) => `<div class="csv-warn">${esc(w)}</div>`).join('')}
+    <p class="section-label">列の対応</p>
+    <div class="csv-map">${map}</div>
+    <p class="section-label">先頭 ${Math.min(10, p.sample.length)} 行</p>
+    <div class="grid-wrap" style="max-height:34vh;border:1px solid var(--border);border-radius:6px">
+      <table class="grid"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+    </div>`;
+}
+
+$('#csvFile').addEventListener('change', () => {
+  $('#csvPreview').innerHTML = '';
+  $('#csvImportMessage').textContent = '';
+  $('#btnCsvImport').disabled = true;
+  csvPreviewData = null;
+});
+
+$('#btnCsvImport').addEventListener('click', () => {
+  if (!csvPreviewData) return;
+  const p = csvPreviewData.preview;
+  const { serverId, qs } = importQuery({ confirm: 'true' });
+
+  openConfirm({
+    title: 'CSV の取り込み',
+    danger: true,
+    body: `<div class="notice danger"><strong>${num(p.totalRows)} 行</strong>を
+        <strong>${esc(p.schema)}.${esc(p.table)}</strong> に追加します。<br>
+        1 行でも失敗した場合は、すべて取り消します（途中まで入ることはありません）。</div>
+      <div class="notice">対象の列: ${esc(p.matchedColumns.join(', '))}</div>
+      ${p.warnings.length ? p.warnings.map((w) => `<div class="csv-warn">${esc(w)}</div>`).join('') : ''}`,
+    sql: `INSERT INTO ${p.schema}.${p.table}\n  (${p.matchedColumns.join(', ')})\nVALUES\n  (${p.matchedColumns.map(() => '?').join(', ')});\n\n-- 上記を ${p.totalRows} 行分、1 つのトランザクションで実行します\n-- 値はすべてバインド変数として渡されます`,
+    run: async () => {
+      const r = await postCsv(`/api/db/${serverId}/import/execute?${qs}`, csvPreviewData.buffer);
+      return r;
+    },
+    done: 'CSV を取り込みました',
+  });
 });
 
 /* ============================================================

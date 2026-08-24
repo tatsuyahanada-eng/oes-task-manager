@@ -6,6 +6,7 @@ const express = require('express');
 const connectionsRouter = require('./src/routes/connections');
 const browseRouter = require('./src/routes/browse');
 const writeRouter = require('./src/routes/write');
+const csvRouter = require('./src/routes/csv');
 const auth = require('./src/auth');
 const pool = require('./src/pool');
 
@@ -44,6 +45,8 @@ app.get('/api/health', (req, res) => {
 });
 
 app.use('/api/connections', connectionsRouter);
+// CSV は参照系より先に置く (tables/... 配下に export.csv を足しているため)
+app.use('/api/db/:connectionId', csvRouter);
 // 更新系を先に評価する (参照系と同じパスに PATCH / DELETE を足しているため)
 app.use('/api/db/:connectionId', writeRouter);
 app.use('/api/db/:connectionId', browseRouter);

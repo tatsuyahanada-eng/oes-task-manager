@@ -478,6 +478,9 @@ select option { background: var(--bg-raise); color: var(--text); }
   justify-content: center;
   z-index: 60;
 }
+
+/* 実行確認は、他のシート (CSV など) から開かれるので必ず最前面に出す */
+#confirmModal { z-index: 70; }
 .sheet {
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);
@@ -626,3 +629,80 @@ select option { background: var(--bg-raise); color: var(--text); }
   .btn-sm { min-height: 27px; }
 }
 
+
+/* ---------- CSV 入出力 ---------- */
+.seg {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 3px;
+}
+.seg-btn {
+  flex: 1 1 0;
+  font: inherit;
+  font-size: 12.5px;
+  padding: 7px 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+.seg-btn.is-active { background: var(--bg-raise); color: var(--accent); font-weight: 600; }
+
+.csv-panel { display: none; }
+.csv-panel.is-active { display: block; }
+
+.csv-panel .check { margin-bottom: 9px; }
+.csv-panel .field { margin-top: 4px; }
+
+input[type=file] {
+  font-family: var(--sans);
+  font-size: 13px;
+  padding: 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text-mute);
+  width: 100%;
+}
+input[type=file]::file-selector-button {
+  font: inherit;
+  font-size: 12.5px;
+  margin-right: 10px;
+  padding: 5px 11px;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  background: var(--bg-raise);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.csv-summary {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 12px;
+  font-size: 12.5px;
+  margin: 10px 0;
+}
+.csv-summary dt { color: var(--text-dim); white-space: nowrap; }
+.csv-summary dd { margin: 0; font-family: var(--mono); color: var(--text); word-break: break-all; }
+
+.csv-warn {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--warn);
+  background: var(--bg-raise);
+  border-radius: 6px;
+  padding: 8px 11px;
+  margin: 8px 0;
+  font-size: 12.5px;
+  color: var(--text-mute);
+}
+.csv-map { font-family: var(--mono); font-size: 11.5px; display: grid; gap: 2px; margin: 8px 0; }
+.csv-map .hit { color: var(--ok); }
+.csv-map .miss { color: var(--text-dim); }
+.csv-map .arrow { color: var(--text-dim); }

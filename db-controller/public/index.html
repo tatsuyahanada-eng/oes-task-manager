@@ -61,6 +61,7 @@
       <h2 id="dataTitle">データ</h2>
       <div class="pane-actions">
         <button class="btn btn-sm" id="btnColumns">列定義</button>
+        <button class="btn btn-sm" id="btnCsv">CSV</button>
         <button class="btn btn-sm btn-write" id="btnAddRow" hidden>+ 行追加</button>
       </div>
     </div>
@@ -297,6 +298,93 @@
       <button class="icon-btn" id="btnCloseColumns" aria-label="閉じる">✕</button>
     </div>
     <div id="columnsBody"></div>
+  </div>
+</div>
+
+<!-- ===== CSV 入出力 ===== -->
+<div class="sheet-backdrop" id="csvModal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="csvTitle">
+    <div class="sheet-head">
+      <h2 id="csvTitle">CSV 入出力</h2>
+      <button class="icon-btn" id="btnCloseCsv" aria-label="閉じる">✕</button>
+    </div>
+    <p class="sheet-sub" id="csvTarget"></p>
+
+    <div class="seg" id="csvTabs">
+      <button class="seg-btn is-active" data-csv="export">出力</button>
+      <button class="seg-btn" data-csv="import">取り込み</button>
+      <button class="seg-btn" data-csv="backup">一括バックアップ</button>
+    </div>
+
+    <!-- 共通の書式設定 -->
+    <div class="field-row">
+      <label class="field">
+        <span>文字コード</span>
+        <select id="csvEncoding"></select>
+      </label>
+      <label class="field">
+        <span>区切り文字</span>
+        <select id="csvDelimiter"></select>
+      </label>
+    </div>
+
+    <!-- 出力 -->
+    <section class="csv-panel is-active" data-csv-panel="export">
+      <label class="check">
+        <input type="checkbox" id="csvUseWhere" checked>
+        いまの WHERE 条件で絞り込む
+      </label>
+      <p class="muted" id="csvWhereText"></p>
+      <div class="notice">
+        テーブルの<strong>全行</strong>を出力します（絞り込みを指定した場合はその結果）。
+        画面に表示している件数とは関係ありません。
+      </div>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-primary" id="btnExportTable">このテーブルを出力</button>
+      </div>
+    </section>
+
+    <!-- 取り込み -->
+    <section class="csv-panel" data-csv-panel="import">
+      <div class="notice danger" id="csvImportReadonly" hidden>
+        この接続は<strong>読み取り専用</strong>です。取り込むには設定で解除してください。
+      </div>
+      <label class="field">
+        <span>CSV ファイル</span>
+        <input type="file" id="csvFile" accept=".csv,.txt,text/csv">
+      </label>
+      <label class="check">
+        <input type="checkbox" id="csvHasHeader" checked> 1 行目は見出し
+      </label>
+      <label class="check">
+        <input type="checkbox" id="csvEmptyAsNull" checked> 空欄は NULL として取り込む
+      </label>
+      <p class="muted">文字コードと区切り文字は「自動」で判定します（上で明示も可能）。</p>
+      <div id="csvPreview"></div>
+      <p class="form-message" id="csvImportMessage"></p>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btnCsvPreview">内容を確認</button>
+        <button type="button" class="btn btn-write" id="btnCsvImport" disabled>取り込む</button>
+      </div>
+    </section>
+
+    <!-- 一括バックアップ -->
+    <section class="csv-panel" data-csv-panel="backup">
+      <div class="notice">
+        いま選んでいるスキーマの<strong>全テーブル</strong>を CSV にして、ZIP にまとめて保存します。
+        テーブルごとに 1 ファイル、内容の一覧も同梱します。
+      </div>
+      <label class="check">
+        <input type="checkbox" id="csvIncludeViews"> ビューも含める
+      </label>
+      <div id="csvBackupInfo" class="muted"></div>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-primary" id="btnBackupZip">ZIP でまとめて保存</button>
+      </div>
+    </section>
   </div>
 </div>
 
