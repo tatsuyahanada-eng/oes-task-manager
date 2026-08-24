@@ -63,6 +63,22 @@ npm start
 
 共有サーバへの置き方は **[SHARED.md](SHARED.md)** を参照してください。
 
+### レンタルサーバの DB につなぐ
+
+DB が「`.lan`」で終わる内部ホストにしか居ない場合（ロリポップなど）、
+手元から直接は届きません。SSH が使えるなら `tunnel.sh` で解決します。
+
+```bash
+DBC_SSH_USER='アカウント名' DBC_DB_HOST='mysql151.phy.lolipop.lan' ./tunnel.sh
+```
+
+トンネルを張り、そのまま DB Controller を起動します。Ctrl+C で両方閉じます。
+DB Controller には **ホスト `127.0.0.1` / ポート `13306`** として登録してください。
+
+つなぐ前にサーバの状態を確かめたい場合は、`bridge/dbc-check.php` を
+アップロードして開くと、接続可否・文字コード・テーブル一覧が分かります
+（参照のみ。詳しくは [LOLIPOP.md](LOLIPOP.md)）。
+
 ### PWA として使う
 
 - **PC (Chrome / Edge)** — アドレスバーのインストールアイコン、または画面右上の「インストール」ボタン
