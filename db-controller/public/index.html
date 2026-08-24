@@ -32,8 +32,20 @@
     <button class="icon-btn" id="btnInstall" hidden title="ホーム画面に追加">インストール</button>
     <span class="mode-badge" id="modeBadge" hidden></span>
     <span class="conn-status" id="connStatus">未接続</span>
+    <span class="user-chip" id="userChip" hidden>
+      <span class="who" id="userName"></span>
+      <button class="icon-btn" id="btnLogout" title="ログアウト">ログアウト</button>
+    </span>
   </div>
 </header>
+
+<!-- 初期パスワードのままなら警告する -->
+<div class="default-pw-banner" id="defaultPwBanner" hidden>
+  <strong>初期パスワードのままです。</strong>
+  <span>設定画面から変更してください（変更するまで外部公開はできません）。</span>
+  <span class="spacer"></span>
+  <button class="btn btn-sm" id="btnChangePwFromBanner">パスワードを変更</button>
+</div>
 
 <!-- ===== 本体 ===== -->
 <div class="app" id="app">
@@ -118,6 +130,16 @@
     <div class="server-list" id="serverList"></div>
 
     <div class="settings-about">
+      <h3>アカウント</h3>
+      <dl>
+        <dt>ログイン中</dt><dd id="settingsUser">-</dd>
+        <dt>自動ログアウト</dt><dd id="settingsIdle">-</dd>
+      </dl>
+      <div class="settings-actions">
+        <button class="btn btn-sm" id="btnChangePw">パスワードを変更</button>
+        <button class="btn btn-sm" id="btnLogout2">ログアウト</button>
+      </div>
+
       <h3>このアプリについて</h3>
       <dl>
         <dt>接続情報の保存先</dt><dd>サーバ側の <code>data/connections.json</code>（パスワードは AES-256-GCM で暗号化）</dd>
@@ -188,7 +210,7 @@
         </label>
       </div>
 
-      <div class="field-row" data-for="mssql postgres" hidden>
+      <div class="field-row" data-for="mssql postgres mysql" hidden>
         <label class="field">
           <span>既定データベース</span>
           <input name="database" placeholder="接続後に切り替えできます">
@@ -218,7 +240,7 @@
         <label class="check" data-for="mssql" hidden>
           <input type="checkbox" name="trustServerCertificate" checked> 証明書を信頼
         </label>
-        <label class="check" data-for="postgres" hidden>
+        <label class="check" data-for="postgres mysql" hidden>
           <input type="checkbox" name="ssl"> SSL を使用
         </label>
       </div>
@@ -298,6 +320,40 @@
       <button class="icon-btn" id="btnCloseColumns" aria-label="閉じる">✕</button>
     </div>
     <div id="columnsBody"></div>
+  </div>
+</div>
+
+<!-- ===== パスワード変更 ===== -->
+<div class="sheet-backdrop" id="pwModal" hidden>
+  <div class="sheet sheet-narrow" role="dialog" aria-modal="true" aria-labelledby="pwTitle">
+    <div class="sheet-head">
+      <h2 id="pwTitle">パスワードの変更</h2>
+      <button class="icon-btn" id="btnClosePw" aria-label="閉じる">✕</button>
+    </div>
+    <form id="pwForm" autocomplete="off">
+      <label class="field">
+        <span>現在のパスワード</span>
+        <input type="password" id="pwCurrent" required autocomplete="current-password">
+      </label>
+      <label class="field">
+        <span>新しいパスワード</span>
+        <input type="password" id="pwNew" required autocomplete="new-password">
+      </label>
+      <label class="field">
+        <span>新しいパスワード（確認）</span>
+        <input type="password" id="pwConfirm" required autocomplete="new-password">
+      </label>
+      <div class="notice">
+        10 文字以上で、英大文字・小文字・数字をすべて含めてください。<br>
+        変更すると<strong>すべての端末でログアウト</strong>されます。
+      </div>
+      <p class="form-message" id="pwMessage"></p>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btnCancelPw">やめる</button>
+        <button type="submit" class="btn btn-primary">変更する</button>
+      </div>
+    </form>
   </div>
 </div>
 

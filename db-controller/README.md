@@ -1,6 +1,7 @@
 # DB Controller
 
-Oracle / SQL Server / PostgreSQL を横断して、**ツリーで構造を確認し、データを参照・編集できる DB 管理ツール**です。
+Oracle / SQL Server / **MySQL / MariaDB** / PostgreSQL を横断して、
+**ツリーで構造を確認し、データを参照・編集できる DB 管理ツール**です。
 PWA なので、PC でもスマホでも同じ画面が使え、ホーム画面に追加すればアプリのように起動できます。
 
 CSV の入出力（Shift_JIS 対応、スキーマ全体の ZIP バックアップ）も行えます。
@@ -30,6 +31,19 @@ npm start
 ```
 
 ブラウザで <http://127.0.0.1:3000> を開きます。ポートを変えるなら `PORT=8080 npm start`。
+
+### ログイン
+
+トップページはログイン画面です。**ログインしないと画面も API も見られません。**
+
+```
+初期ユーザー名 : welsysadm
+初期パスワード : Welsys@1234
+```
+
+> **初期パスワードのままでは localhost 以外での待ち受けができません。**
+> 起動時に検査し、初期パスワードのまま外部公開しようとすると起動を拒否します。
+> ログイン後、「設定」→「パスワードを変更」から必ず変更してください。
 
 ### PWA として使う
 
@@ -159,8 +173,19 @@ DB の認証情報を扱い、画面から DB を操作できるため、次の�
 `data/connections.json` に AES-256-GCM で暗号化して保存し、API の応答には含めません。
 暗号鍵は `DBC_MASTER_KEY`、無ければ `data/.masterkey` を自動生成します。
 
-**外部公開時は認証が必須**
-`DBC_HOST` を localhost 以外にすると、`DBC_AUTH_USER` / `DBC_AUTH_PASS`（16 文字以上）が無い限り**起動を拒否**します。
+**ログインが必須**
+すべての画面と API はログインしないと使えません。パスワードは **scrypt** でハッシュ化して
+`data/auth.json` に保存し、平文はどこにも残しません。
+
+| 項目 | 内容 |
+|---|---|
+| セッション | httpOnly / SameSite=Strict の Cookie。JavaScript から読めません |
+| 自動ログアウト | 無操作 30 分、発行から 12 時間 |
+| 総当たり対策 | 同じ相手から 5 回失敗すると 15 分受け付けません |
+| パスワード変更 | 設定画面から。変更すると全端末でログアウトされます |
+| 初期パスワード | そのままでは localhost 以外で**起動しません** |
+
+ログイン・ログアウト・パスワード変更は操作履歴にも記録されます。
 
 **オフラインキャッシュはアプリの外枠だけ**
 Service Worker は HTML / CSS / JS / アイコンのみキャッシュします。
@@ -174,8 +199,11 @@ Service Worker は HTML / CSS / JS / アイコンのみキャッシュします�
 |---|---|---|
 | `PORT` | `3000` | 待ち受けポート |
 | `DBC_HOST` | `127.0.0.1` | 待ち受けアドレス |
-| `DBC_AUTH_USER` | (なし) | Basic 認証のユーザー名。localhost 以外では必須 |
-| `DBC_AUTH_PASS` | (なし) | Basic 認証のパスワード。公開時は 16 文字以上 |
+| `DBC_AUTH_USER` | `welsysadm` | 初回起動時のユーザー名（`data/auth.json` が無いときのみ） |
+| `DBC_AUTH_PASS` | (初期値) | 初回起動時のパスワード（同上） |
+| `DBC_SESSION_IDLE_MS` | `1800000` | 無操作でログアウトするまで（既定 30 分） |
+| `DBC_SESSION_MAX_MS` | `43200000` | セッションの上限（既定 12 時間） |
+| `DBC_SECURE_COOKIE` | 自動判定 | `true` で Cookie に Secure を強制 |
 | `DBC_MASTER_KEY` | (なし) | パスワード暗号鍵。未設定なら `data/.masterkey` を自動生成 |
 | `DBM_IDLE_TIMEOUT_MS` | `600000` | 接続を保持するアイドル時間 |
 
@@ -186,16 +214,18 @@ Service Worker は HTML / CSS / JS / アイコンのみキャッシュします�
 ```
 server.js                     Express アプリのエントリポイント
 src/
-  auth.js                     Basic 認証と公開時の起動ポリシー
+  session.js                  ログイン・セッション・パスワード管理
   crypto.js                   パスワードの暗号化・復号
   store.js                    サーバ設定の永続化と検証
   pool.js                     接続のキャッシュとアイドル切断
   audit.js                    更新操作の記録
   csv.js                      CSV の組み立てと読み取り、文字コード変換
   zip.js                      ZIP の書き出し（標準の zlib のみ使用）
-  drivers/                    oracle / mssql / postgres と共通ユーティリティ
-  routes/                     connections（設定）/ browse（参照）/ write（更新）/ csv（入出力）
+  drivers/                    oracle / mssql / mysql / postgres と共通ユーティリティ
+  routes/                     auth（ログイン）/ connections（設定）/ browse（参照）/
+                              write（更新）/ csv（入出力）
 public/
+  login.html                  ログイン画面（トップページ）
   index.html app.js style.css 画面（ビルド不要）
   logo.svg                    WELSYS ロゴ
   manifest.webmanifest sw.js  PWA
@@ -228,6 +258,10 @@ CSV は次の 3 段階で検証しています。
 | 画面（PC・スマホ） | 47 | 実ファイルのダウンロードとアップロードを含む通し操作 |
 
 ZIP は `unzip` と Python の `zipfile` の双方で妥当性を確認しています。
+
+MySQL / MariaDB は MariaDB 10.11 に対して、ハイフンを含む DB 名・日本語のコメント・
+複合主キー・外部キー・CRUD・CSV まで確認しています（32 項目）。
+ロリポップでの利用は **[LOLIPOP.md](LOLIPOP.md)** を参照してください。
 
 **Oracle と SQL Server は実サーバーでの確認ができていません。**
 ドライバは各カタログビュー (`all_tab_columns`、`sys.*`) に沿って実装していますが、

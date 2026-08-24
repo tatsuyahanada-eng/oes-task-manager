@@ -47,7 +47,7 @@ function validate(input) {
   if (type === 'oracle') {
     if (!input.host) errors.push('ホストは必須です。');
     if (!input.serviceName && !input.sid) errors.push('サービス名 または SID のいずれかが必要です。');
-  } else if (type === 'mssql' || type === 'postgres') {
+  } else if (type === 'mssql' || type === 'postgres' || type === 'mysql') {
     if (!input.host) errors.push('ホストは必須です。');
   }
   if (!input.username) errors.push('ユーザー名は必須です。');

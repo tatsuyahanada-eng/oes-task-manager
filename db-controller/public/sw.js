@@ -7,11 +7,12 @@
  *     DB のデータや接続情報が端末に residual として残らないようにするため
  * ========================================================== */
 
-const CACHE = 'dbctl-shell-v2';
+const CACHE = 'dbctl-shell-v3';
 
 const SHELL = [
   './',
   './index.html',
+  './login.html',
   './app.js',
   './style.css',
   './logo.svg',
@@ -46,6 +47,11 @@ self.addEventListener('fetch', (event) => {
   // API はキャッシュを一切挟まない (DB のデータを端末に残さない)
   if (url.pathname.startsWith('/api/')) return;
 
+  // ログイン画面へのリダイレクトはキャッシュしない。
+  // これを保存すると、ログイン後もリダイレクトが返り続けて画面が出なくなる。
+  const cacheable = (res) =>
+    res && res.ok && res.status === 200 && res.type === 'basic' && !res.redirected;
+
   // 画面の外枠はキャッシュ優先。オフラインでも起動だけはできるようにする。
   event.respondWith(
     caches.match(request).then((hit) => {
@@ -53,7 +59,7 @@ self.addEventListener('fetch', (event) => {
         // 裏で更新しておく
         fetch(request)
           .then((res) => {
-            if (res && res.ok) caches.open(CACHE).then((c) => c.put(request, res.clone()));
+            if (cacheable(res)) caches.open(CACHE).then((c) => c.put(request, res.clone()));
           })
           .catch(() => {});
         return hit;

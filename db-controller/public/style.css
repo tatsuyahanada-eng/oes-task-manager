@@ -706,3 +706,103 @@ input[type=file]::file-selector-button {
 .csv-map .hit { color: var(--ok); }
 .csv-map .miss { color: var(--text-dim); }
 .csv-map .arrow { color: var(--text-dim); }
+
+/* ============================================================
+ * ログイン画面
+ * ========================================================== */
+.login-body {
+  display: block;
+  background:
+    radial-gradient(1100px 520px at 50% -10%, #16202e 0%, transparent 62%),
+    var(--bg);
+  min-height: 100dvh;
+}
+
+.login-wrap {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 18px calc(28px + var(--safe-b));
+  gap: 18px;
+}
+
+.login-card {
+  width: min(400px, 100%);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 30px 26px 24px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .45);
+}
+
+.login-brand { text-align: center; margin-bottom: 24px; }
+.login-logo { height: 30px; width: auto; margin-bottom: 14px; }
+.login-brand h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: .01em; }
+.login-sub { margin: 5px 0 0; font-size: 12px; color: var(--text-dim); }
+
+.pw-wrap { position: relative; display: flex; }
+.pw-wrap input { padding-right: 62px; }
+.pw-toggle {
+  position: absolute;
+  right: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  font: inherit;
+  font-size: 11.5px;
+  padding: 5px 9px;
+  background: var(--bg-raise);
+  border: 1px solid var(--border-strong);
+  color: var(--text-mute);
+  border-radius: 5px;
+  cursor: pointer;
+}
+.pw-toggle:hover { color: var(--text); border-color: var(--accent); }
+
+.login-message { min-height: 20px; margin: 4px 0 12px; font-size: 12.5px; color: var(--text-dim); }
+.login-message.is-error { color: var(--danger); }
+
+.login-submit { width: 100%; padding: 12px; font-size: 15px; font-weight: 700; }
+
+.login-note {
+  margin: 20px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+.login-foot { font-size: 11px; color: var(--text-dim); letter-spacing: .06em; margin: 0; }
+
+/* 初期パスワードのままなら、アプリ内で警告を出す */
+.default-pw-banner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  background: #3a2a10;
+  border-bottom: 1px solid #5c4318;
+  color: #f0d79a;
+  font-size: 12.5px;
+}
+.default-pw-banner strong { color: #ffe9b8; }
+.default-pw-banner .spacer { flex: 1 1 auto; }
+
+/* ヘッダーのユーザー表示 */
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-mute);
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.user-chip .who { font-family: var(--mono); }
+@media (max-width: 560px) { .user-chip .who { display: none; } }
+.settings-actions { display: flex; gap: 7px; margin: 10px 0 4px; flex-wrap: wrap; }

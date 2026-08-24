@@ -7,35 +7,57 @@ const connectionsRouter = require('./src/routes/connections');
 const browseRouter = require('./src/routes/browse');
 const writeRouter = require('./src/routes/write');
 const csvRouter = require('./src/routes/csv');
-const auth = require('./src/auth');
+const authRouter = require('./src/routes/auth');
+const session = require('./src/session');
 const pool = require('./src/pool');
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
 // 既定では localhost のみで待ち受ける。DB 認証情報を扱うため外部公開はしない。
-const HOST = process.env.DBC_HOST || process.env.DBM_HOST || '127.0.0.1';
-const AUTH_USER = process.env.DBC_AUTH_USER || process.env.DBM_AUTH_USER || '';
-const AUTH_PASS = process.env.DBC_AUTH_PASS || process.env.DBM_AUTH_PASS || '';
+const HOST = process.env.DBC_HOST || '127.0.0.1';
 
-// localhost 以外にバインドするなら認証を必須にする
-const policy = auth.checkStartupPolicy(HOST, AUTH_USER, AUTH_PASS);
+// アカウントを用意する (初回は data/auth.json を作る)
+const account = session.ensureAccount();
+
+// 初期パスワードのまま外部公開しようとしていたら止める
+const policy = session.checkStartupPolicy(HOST, account);
 if (!policy.ok) {
   console.error('\n起動を中止しました。\n');
-  console.error(policy.message.replace(/DBM_/g, 'DBC_'));
+  console.error(policy.message);
   console.error('');
   process.exit(1);
 }
 
-// 静的ファイルより先に認証を通す (画面自体も保護する)
-app.use(auth.middleware(AUTH_USER, AUTH_PASS));
+// リバースプロキシ配下でも、元のプロトコルと接続元 IP を正しく見る
+app.set('trust proxy', process.env.DBC_TRUST_PROXY === 'false' ? false : 1);
+app.disable('x-powered-by');
+
+// 最低限のセキュリティヘッダー
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+  next();
+});
 
 app.use(express.json({ limit: '2mb' }));
+
+// ログイン API はログイン不要。ログイン画面と、その表示に要る静的ファイルも通す。
+app.use('/api/auth', authRouter);
+app.use(session.requireLogin([
+  '/login.html', '/style.css', '/logo.svg',
+  '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png',
+  '/manifest.webmanifest', '/sw.js',
+]));
 
 app.use(
   express.static(path.join(__dirname, 'public'), {
     setHeaders(res, filePath) {
       // Service Worker は毎回取り直させる (更新が反映されなくなるのを防ぐ)
       if (filePath.endsWith('sw.js')) res.setHeader('Cache-Control', 'no-cache');
+      // 画面と API の応答は端末に残さない
+      if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store');
     },
   })
 );
@@ -60,6 +82,8 @@ app.use((err, req, res, next) => {
   const status = err.status || 500;
   if (status === 502) {
     console.warn(`[db] ${req.method} ${req.originalUrl} — ${err.message}`);
+  } else if (status === 401 || status === 429) {
+    console.warn(`[auth] ${req.method} ${req.originalUrl} — ${err.message}`);
   } else if (status >= 500) {
     console.error(`[error] ${req.method} ${req.originalUrl}`, err);
   }
@@ -68,10 +92,16 @@ app.use((err, req, res, next) => {
 
 const server = app.listen(PORT, HOST, () => {
   console.log(`DB Controller: http://${HOST}:${PORT}`);
-  console.log(`  認証: ${policy.enabled ? `有効 (ユーザー ${AUTH_USER})` : '無効 (localhost 専用)'}`);
-  if (!auth.isLoopback(HOST)) {
+  console.log(`  ログイン: 必須（ユーザー ${account.username}）`);
+  if (account.isDefaultPassword) {
+    console.log('');
+    console.log('  ※ パスワードが初期値のままです。');
+    console.log('     ログイン後、設定画面から変更してください。');
+    console.log('     変更するまで、localhost 以外での待ち受けはできません。');
+    console.log('');
+  }
+  if (!policy.loopback) {
     console.log('  注意: 外部公開しています。HTTPS 経由でのみアクセスしてください。');
-    console.log('  ※ PWA としてインストールするには HTTPS が必要です (localhost は例外)。');
   }
 });
 

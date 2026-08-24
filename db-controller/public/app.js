@@ -44,6 +44,7 @@ const state = {
 async function api(path, options = {}) {
   const res = await fetch(path, {
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
@@ -52,6 +53,11 @@ async function api(path, options = {}) {
   if (text) {
     try { payload = JSON.parse(text); }
     catch { throw new Error(`応答を解釈できません (HTTP ${res.status})`); }
+  }
+  // セッションが切れていたらログイン画面へ戻す
+  if (res.status === 401 && payload.needLogin) {
+    location.replace('login.html');
+    throw new Error('ログインが必要です。');
   }
   if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
   return payload;
@@ -490,7 +496,7 @@ function buildGrid(columns, rows) {
     const opsCell = ops
       ? `<td class="ops"><div class="ops-inner">
            <button class="btn btn-sm" data-row="${i}" data-op="edit">修正</button>
-           <button class="btn btn-sm btn-danger" data-row="${i}" data-op="del">削除</button>
+           <button class="btn btn-sm btn-danger" data-row="${i}" data-op="delete">削除</button>
          </div></td>` : '';
     return `<tr>${opsCell}${cells}</tr>`;
   }).join('');
@@ -1208,6 +1214,71 @@ document.addEventListener('keydown', (ev) => {
 });
 
 /* ============================================================
+ * ログイン状態
+ * ========================================================== */
+
+async function loadAccount() {
+  const me = await api('/api/auth/me');
+  $('#userChip').hidden = false;
+  $('#userName').textContent = me.username;
+  $('#settingsUser').textContent = me.username;
+  $('#settingsIdle').textContent = `${me.idleTimeoutMinutes} 分の無操作でログアウト`;
+  $('#defaultPwBanner').hidden = !me.isDefaultPassword;
+  return me;
+}
+
+async function doLogout() {
+  if (!confirm('ログアウトします。よろしいですか？')) return;
+  try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* 失敗しても画面は戻す */ }
+  location.replace('login.html');
+}
+
+$('#btnLogout').addEventListener('click', doLogout);
+$('#btnLogout2').addEventListener('click', doLogout);
+
+/* ---------- パスワード変更 ---------- */
+
+function openPwModal() {
+  $('#pwForm').reset();
+  $('#pwMessage').textContent = '';
+  $('#pwMessage').className = 'form-message';
+  $('#pwModal').hidden = false;
+  setTimeout(() => $('#pwCurrent').focus(), 60);
+}
+
+$('#btnChangePw').addEventListener('click', openPwModal);
+$('#btnChangePwFromBanner').addEventListener('click', openPwModal);
+$('#btnClosePw').addEventListener('click', () => { $('#pwModal').hidden = true; });
+$('#btnCancelPw').addEventListener('click', () => { $('#pwModal').hidden = true; });
+
+$('#pwForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const msg = $('#pwMessage');
+  msg.className = 'form-message';
+
+  const current = $('#pwCurrent').value;
+  const next = $('#pwNew').value;
+  if (next !== $('#pwConfirm').value) {
+    msg.className = 'form-message err';
+    msg.textContent = '新しいパスワードが一致しません。';
+    return;
+  }
+
+  msg.textContent = '変更しています…';
+  try {
+    const r = await api('/api/auth/password', {
+      method: 'POST', body: { currentPassword: current, newPassword: next },
+    });
+    msg.className = 'form-message ok';
+    msg.textContent = r.message;
+    setTimeout(() => location.replace('login.html'), 2500);
+  } catch (err) {
+    msg.className = 'form-message err';
+    msg.textContent = err.message;
+  }
+});
+
+/* ============================================================
  * CSV 入出力
  * ========================================================== */
 
@@ -1348,8 +1419,10 @@ async function postCsv(path, buffer) {
   const res = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'text/csv' },
+    credentials: 'same-origin',
     body: buffer,
   });
+  if (res.status === 401) { location.replace('login.html'); throw new Error('ログインが必要です。'); }
   const text = await res.text();
   let payload = {};
   if (text) { try { payload = JSON.parse(text); } catch { throw new Error(`応答を解釈できません (HTTP ${res.status})`); } }
@@ -1464,6 +1537,7 @@ $('#btnInstall').addEventListener('click', async () => {
 
 (async function init() {
   try {
+    await loadAccount();
     const { drivers } = await api('/api/connections/drivers');
     state.drivers = drivers;
     $('#typeSelect').innerHTML = drivers
