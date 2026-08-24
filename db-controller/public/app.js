@@ -42,12 +42,18 @@ const state = {
  * ---------------------------------------------------------- */
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'same-origin',
-    ...options,
-    body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(path, {
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      ...options,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    });
+  } catch {
+    // fetch 自体が失敗 = サーバから応答が返っていない
+    throw new Error('サーバに接続できません。DB Controller の Node.js が起動しているか確認してください。');
+  }
   const text = await res.text();
   let payload = {};
   if (text) {
@@ -1091,7 +1097,13 @@ function applyTypeVisibility() {
     el.hidden = !el.dataset.for.split(' ').includes(type);
   });
   const d = state.drivers.find((x) => x.id === type);
-  if (d) form.elements.port.placeholder = `既定 ${d.defaultPort}`;
+  if (d) {
+    form.elements.port.placeholder = `既定 ${d.defaultPort}`;
+    // 別の DB 種別の既定ポートが残っていたら、選び直した種別のものに合わせる
+    const cur = form.elements.port.value.trim();
+    const isOtherDefault = state.drivers.some((x) => x.id !== type && String(x.defaultPort) === cur);
+    if (cur === '' || isOtherDefault) form.elements.port.value = String(d.defaultPort);
+  }
 }
 
 function applyReadOnlyNotice() {
