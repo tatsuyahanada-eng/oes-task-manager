@@ -18,6 +18,11 @@ DirectoryIndex index.php
     # 書くと、サブディレクトリに置いたときサイトの一番上へ飛ばそうとして
     # 404 になります。省略すれば、この .htaccess のある場所が基準になります。
 
+    # 自己診断だけは、本体を通さずそのまま実行させる。
+    # ここを通してしまうと、本体が壊れているときに
+    # 診断ページ自体が「見つかりません」になって届かない。
+    RewriteRule ^check\.php$ - [L]
+
     # 実在するファイルでも index.php を通す（ログイン確認のため）
     RewriteRule ^ index.php [QSA,L]
 </IfModule>
