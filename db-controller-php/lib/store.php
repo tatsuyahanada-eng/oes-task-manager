@@ -59,14 +59,15 @@ function normalize_conn(array $input, ?array $existing = null): array
     if (mb_strlen($name) > 80) throw bad('表示名は 80 文字までにしてください。');
 
     $type = (string)pick($input, 'type', '');
-    if (!isset(drivers()[$type])) throw bad('対応していない DB 種別です。');
+    $meta = DbDriver::meta($type);
+    if ($meta === null) throw bad('対応していない DB 種別です。');
 
     $host = trim((string)pick($input, 'host', ''));
     if ($host === '') throw bad('ホストを入力してください。');
     if (!preg_match('/^[A-Za-z0-9._\-:\[\]]+$/', $host)) throw bad('ホストの形式が正しくありません。');
 
     $port = (int)pick($input, 'port', 0);
-    if ($port <= 0) $port = drivers()[$type]['defaultPort'];
+    if ($port <= 0) $port = $meta['defaultPort'];
     if ($port < 1 || $port > 65535) throw bad('ポートは 1〜65535 で指定してください。');
 
     $username = trim((string)pick($input, 'username', ''));

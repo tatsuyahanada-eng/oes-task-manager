@@ -30,25 +30,47 @@ function json_out($data, int $status = 200): void
     exit;
 }
 
+/** リクエストの本文が JSON かどうか。CSV の取り込みでは JSON ではない。 */
+function is_json_request(): bool
+{
+    $ct = strtolower((string)($_SERVER['CONTENT_TYPE'] ?? ''));
+    return $ct === '' || str_contains($ct, 'json');
+}
+
 /** リクエストの JSON 本文を配列で受け取る。 */
 function json_in(): array
 {
     static $cached = null;
     if ($cached !== null) return $cached;
 
-    $raw = file_get_contents('php://input');
-    if ($raw === false || $raw === '') return $cached = [];
+    $raw = raw_in();
+    if ($raw === '') return $cached = [];
 
     $data = json_decode($raw, true);
     if (!is_array($data)) throw bad('リクエストの形式が正しくありません。');
     return $cached = $data;
 }
 
-/** 本文の生データ（CSV の取り込みなどで使う）。 */
+/**
+ * JSON 本文を、JSON でなければ空として受け取る。
+ * CSV を本文に載せるエンドポイントと同じ経路を通るときに使う。
+ */
+function json_in_optional(): array
+{
+    if (!is_json_request()) return [];
+    try { return json_in(); } catch (ApiError $e) { return []; }
+}
+
+/**
+ * 本文の生データ（CSV の取り込みなどで使う）。
+ * php://input は環境によって一度しか読めないため、読んだ内容を覚えておく。
+ */
 function raw_in(): string
 {
+    static $cached = null;
+    if ($cached !== null) return $cached;
     $raw = file_get_contents('php://input');
-    return $raw === false ? '' : $raw;
+    return $cached = ($raw === false ? '' : $raw);
 }
 
 /** 配列から値を取り出す。無ければ既定値。 */

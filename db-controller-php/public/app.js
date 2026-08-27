@@ -18,6 +18,8 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 const state = {
   drivers: [],
   me: null,
+  theme: null,
+  labels: {},
   servers: [],
   view: 'tree',
   /** ツリーの展開状態 key -> bool */
@@ -160,7 +162,9 @@ function updateBadges() {
   const w = canWrite(id);
   const byRole = state.me && !state.me.canWrite;
   badge.hidden = false;
-  badge.textContent = w ? '書込可' : (byRole ? '読取専用（権限）' : '読取専用');
+  badge.textContent = w
+    ? badgeLabel('writable', '書込可')
+    : badgeLabel('readOnly', '読取専用') + (byRole ? '（権限）' : '');
   badge.title = byRole
     ? `ログイン中の権限（${state.me.roleLabel || state.me.role}）ではデータを変更できません。`
     : '';
@@ -1115,12 +1119,15 @@ function applyTypeVisibility() {
     // なぜ選べないのか、どうすれば使えるのかを、その場で伝える
     hint.hidden = false;
     hint.innerHTML = missing
-      .map((x) => `<strong>${esc(x.label)}</strong> は未導入です。サーバで <code>npm install ${esc(x.module)}</code> を実行し、DB Controller を再起動してください。`)
+      .map((x) => `<strong>${esc(x.label)}</strong> は未導入です。サーバの PHP に <code>${esc(x.module)}</code> を入れてください。`)
       .join('<br>');
   } else {
     hint.hidden = true;
     hint.textContent = '';
   }
+
+  // 選んだ種別に応じて、どこから何を写せばよいかを出す
+  renderConnGuide(d);
   if (d) {
     form.elements.port.placeholder = `既定 ${d.defaultPort}`;
     // 別の DB 種別の既定ポートが残っていたら、選び直した種別のものに合わせる
@@ -1128,6 +1135,42 @@ function applyTypeVisibility() {
     const isOtherDefault = state.drivers.some((x) => x.id !== type && String(x.defaultPort) === cur);
     if (cur === '' || isOtherDefault) form.elements.port.value = String(d.defaultPort);
   }
+}
+
+/**
+ * 接続情報の案内。
+ * 「管理画面のどの欄を、この入力欄へ写せばよいか」を種別ごとに出す。
+ */
+function renderConnGuide(driver) {
+  const box = $('#connGuide');
+  if (!box) return;
+  if (!driver || !driver.guide || !driver.guide.fields
+      || !Object.keys(driver.guide.fields).length) {
+    box.hidden = true;
+    return;
+  }
+
+  const g = driver.guide;
+  box.hidden = false;
+  box.innerHTML = `
+    <div class="guide-head">
+      <strong>${esc(g.title)}</strong>
+      <span>${esc(g.where)}</span>
+    </div>
+    <table class="guide-table">
+      <thead><tr><th>入力欄</th><th>どこの値か</th><th>例</th></tr></thead>
+      <tbody>
+        ${Object.values(g.fields).map((f) => `
+          <tr>
+            <td class="guide-field">${esc(f.label)}</td>
+            <td>${esc(f.from)}</td>
+            <td class="guide-example">${esc(f.example)}</td>
+          </tr>
+          ${f.note ? `<tr class="guide-note-row"><td></td>
+            <td colspan="2" class="guide-note">${esc(f.note)}</td></tr>` : ''}
+        `).join('')}
+      </tbody>
+    </table>`;
 }
 
 function applyReadOnlyNotice() {
@@ -1704,6 +1747,202 @@ $('#userList')?.addEventListener('click', async (ev) => {
 });
 
 /* ============================================================
+ * 配色・文言（下側の作業エリア）
+ *
+ * 既定値は theme.css に書いてある。
+ * ここで当てるのは「画面から変えた分」だけで、CSS より優先される。
+ * ========================================================== */
+
+const THEME_TARGETS = ['#app', '#tabbar'];
+
+/** 変更分を実際の画面へ当てる。 */
+function applyTheme(applied) {
+  const vars = { ...(applied.tokens || {}), ...(applied.sizes || {}) };
+  for (const sel of THEME_TARGETS) {
+    const el = document.querySelector(sel);
+    if (!el) continue;
+    // 前回当てた分を消してから入れ直す（消した項目を CSS の既定へ戻すため）
+    for (const name of Array.from(el.style)) {
+      if (name.startsWith('--')) el.style.removeProperty(name);
+    }
+    for (const [k, v] of Object.entries(vars)) el.style.setProperty(`--${k}`, v);
+  }
+  applyLabels(applied.labels || {});
+}
+
+/**
+ * 文言を差し替える対象。
+ *
+ * セレクタは必ずタブの「ボタン」に限ること。
+ * [data-view="data"] だけだと <section class="pane" data-view="data"> にも当たり、
+ * ペインの中身をまるごと消してしまう。
+ */
+const LABEL_TARGETS = {
+  appTitle:    { sel: '.topbar h1',                            def: 'DB Controller' },
+  tabTree:     { sel: '.tab[data-view="tree"], .dtab[data-view="tree"]',         def: 'ツリー' },
+  tabData:     { sel: '.tab[data-view="data"], .dtab[data-view="data"]',         def: 'データ' },
+  tabCui:      { sel: '.tab[data-view="cui"], .dtab[data-view="cui"]',           def: 'CUI' },
+  tabSettings: { sel: '.tab[data-view="settings"], .dtab[data-view="settings"]', def: '設定' },
+};
+
+function applyLabels(labels) {
+  state.labels = labels || {};
+  for (const [id, t] of Object.entries(LABEL_TARGETS)) {
+    // 指定が無ければ既定の文言に戻す（「既定に戻す」を押したときのため）
+    const text = state.labels[id] || t.def;
+    for (const el of $$(t.sel)) {
+      const icon = el.querySelector('.tab-icon');
+      el.textContent = text;
+      if (icon) el.prepend(icon);
+    }
+  }
+  // 読取専用 / 書込可 のバッジにも反映する
+  updateBadges();
+}
+
+/** 読取専用 / 書込可 の表示文言。 */
+function badgeLabel(key, fallback) {
+  return (state.labels && state.labels[key]) || fallback;
+}
+
+async function loadTheme() {
+  try {
+    const t = await api('/api/theme');
+    state.theme = t;
+    applyTheme(t.applied || {});
+    if (state.me && state.me.canManageUsers) renderThemeEditor();
+  } catch { /* 配色が読めなくても本体は使えるようにする */ }
+}
+
+function renderThemeEditor() {
+  const t = state.theme;
+  if (!t) return;
+  $('#themeBlock').hidden = false;
+
+  const groups = {};
+  for (const tk of t.tokens) (groups[tk.group] = groups[tk.group] || []).push(tk);
+
+  const colorRows = Object.entries(groups).map(([g, items]) => `
+    <div class="theme-group">
+      <div class="theme-group-name">${esc(g)}</div>
+      ${items.map((tk) => `
+        <label class="theme-row">
+          <span class="theme-label">${esc(tk.label)}</span>
+          <input type="color" data-theme-token="${esc(tk.id)}"
+                 value="${esc(tk.value || currentVar(tk.id))}">
+          <input type="text" class="theme-text" data-theme-token-text="${esc(tk.id)}"
+                 value="${esc(tk.value || '')}" placeholder="${esc(currentVar(tk.id))}">
+        </label>`).join('')}
+    </div>`).join('');
+
+  const sizeRows = t.sizes.map((sz) => `
+    <label class="theme-row">
+      <span class="theme-label">${esc(sz.label)}</span>
+      <input type="number" data-theme-size="${esc(sz.id)}" step="0.1"
+             min="${sz.min}" max="${sz.max}"
+             value="${esc(String(sz.value || '').replace(/[a-z]+$/, ''))}"
+             placeholder="${esc(currentVar(sz.id))}">
+      <span class="theme-unit">${esc(sz.unit || '')}</span>
+    </label>`).join('');
+
+  const labelRows = t.labels.map((lb) => `
+    <label class="theme-row">
+      <span class="theme-label">${esc(lb.label)}</span>
+      <input type="text" data-theme-label="${esc(lb.id)}"
+             value="${esc(lb.value || '')}" placeholder="${esc(lb.default)}" maxlength="40">
+    </label>`).join('');
+
+  $('#themeEditor').innerHTML = `
+    ${colorRows}
+    <div class="theme-group">
+      <div class="theme-group-name">大きさ</div>${sizeRows}
+    </div>
+    <div class="theme-group">
+      <div class="theme-group-name">文言</div>${labelRows}
+    </div>`;
+}
+
+/** いま実際に効いている値を読む（既定値の表示用）。 */
+function currentVar(name) {
+  const el = document.querySelector('#app');
+  if (!el) return '';
+  const v = getComputedStyle(el).getPropertyValue(`--${name}`).trim();
+  return v || '';
+}
+
+/** 編集中の内容を集める。 */
+function collectTheme() {
+  const tokens = {};
+  for (const el of $$('#themeEditor [data-theme-token-text]')) {
+    const v = el.value.trim();
+    if (v) tokens[el.dataset.themeTokenText] = v;
+  }
+  const sizes = {};
+  for (const el of $$('#themeEditor [data-theme-size]')) {
+    const v = el.value.trim();
+    if (v) sizes[el.dataset.themeSize] = v;
+  }
+  const labels = {};
+  for (const el of $$('#themeEditor [data-theme-label]')) {
+    const v = el.value.trim();
+    if (v) labels[el.dataset.themeLabel] = v;
+  }
+  return { tokens, sizes, labels };
+}
+
+/** 入力中はその場で反映して、見ながら決められるようにする。 */
+function previewTheme() {
+  const draft = collectTheme();
+  const sizes = {};
+  for (const sz of (state.theme ? state.theme.sizes : [])) {
+    if (draft.sizes[sz.id]) sizes[sz.id] = draft.sizes[sz.id] + (sz.unit || '');
+  }
+  applyTheme({ tokens: draft.tokens, sizes, labels: draft.labels });
+}
+
+$('#themeEditor')?.addEventListener('input', (ev) => {
+  // 色見本と文字入力を連動させる
+  const picker = ev.target.closest('[data-theme-token]');
+  if (picker) {
+    const text = $(`#themeEditor [data-theme-token-text="${CSS.escape(picker.dataset.themeToken)}"]`);
+    if (text) text.value = picker.value;
+  }
+  const text = ev.target.closest('[data-theme-token-text]');
+  if (text && /^#[0-9a-fA-F]{6}$/.test(text.value.trim())) {
+    const p = $(`#themeEditor [data-theme-token="${CSS.escape(text.dataset.themeTokenText)}"]`);
+    if (p) p.value = text.value.trim();
+  }
+  previewTheme();
+});
+
+$('#btnThemeSave')?.addEventListener('click', async () => {
+  try {
+    const r = await api('/api/theme', { method: 'PUT', body: collectTheme() });
+    state.theme.applied = r.applied;
+    applyTheme(r.applied);
+    toast('配色を保存しました。全員に適用されます。', 'ok');
+  } catch (err) { toast(err.message, 'err'); }
+});
+
+$('#btnThemeRevert')?.addEventListener('click', async () => {
+  await loadTheme();
+  renderThemeEditor();
+  toast('編集を取り消しました。');
+});
+
+$('#btnThemeReset')?.addEventListener('click', () => {
+  openConfirm({
+    title: '配色を既定に戻す',
+    body: `<div class="notice">画面から変更した配色・文言をすべて消し、
+      <code>theme.css</code> の内容に戻します。</div>`,
+    sql: '-- data/theme.json を削除します\n-- DB のデータには一切触れません',
+    run: () => api('/api/theme', { method: 'DELETE' }),
+    done: '配色を既定に戻しました',
+    after: async () => { await loadTheme(); renderThemeEditor(); },
+  });
+});
+
+/* ============================================================
  * 起動
  * ========================================================== */
 
@@ -1717,6 +1956,7 @@ $('#userList')?.addEventListener('click', async (ev) => {
       .join('');
     await loadServers();
     await loadUsers();
+    await loadTheme();
     setView('tree');
     cout('DB Controller — \\help でコマンド一覧', 'c-info');
     if (!state.servers.length) cout('サーバが未登録です。設定タブから追加してください。', 'c-info');

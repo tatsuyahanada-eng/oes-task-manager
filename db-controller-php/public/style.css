@@ -841,3 +841,46 @@ input[type=file]::file-selector-button {
 .user-chip .who { font-family: var(--mono); }
 @media (max-width: 560px) { .user-chip .who { display: none; } }
 .settings-actions { display: flex; gap: 7px; margin: 10px 0 4px; flex-wrap: wrap; }
+
+/* ---------- 配色の設定 ---------- */
+.theme-group { margin-bottom: 14px; }
+.theme-group-name {
+  font-size: 11px; color: var(--text-dim); letter-spacing: .06em;
+  text-transform: uppercase; margin-bottom: 5px;
+}
+.theme-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 0; font-size: 12.5px;
+}
+.theme-label { flex: 0 0 110px; color: var(--text-mute); }
+.theme-row input[type=color] {
+  width: 34px; height: 26px; padding: 0; border: 1px solid var(--border-strong);
+  border-radius: 4px; background: none; cursor: pointer; flex: 0 0 auto;
+}
+.theme-row input[type=text],
+.theme-row input[type=number] {
+  flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 12px;
+  padding: 4px 7px;
+}
+.theme-text { max-width: 130px; }
+.theme-unit { flex: 0 0 auto; color: var(--text-dim); font-size: 11px; }
+
+/* ---------- 接続情報の案内 ---------- */
+.conn-guide {
+  margin: 0 0 14px; padding: 10px 12px;
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  border-radius: 6px; background: var(--bg-raise);
+}
+.guide-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.guide-head strong { font-size: 12.5px; color: var(--text); }
+.guide-head span { font-size: 11px; color: var(--text-mute); }
+.guide-table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+.guide-table th {
+  text-align: left; font-weight: 600; color: var(--text-dim);
+  padding: 3px 6px 5px; border-bottom: 1px solid var(--border);
+}
+.guide-table td { padding: 3px 6px; vertical-align: top; color: var(--text-mute); }
+.guide-field { color: var(--text); white-space: nowrap; }
+.guide-example { font-family: var(--mono); color: var(--ok); word-break: break-all; }
+.guide-note-row td { padding-top: 0; padding-bottom: 5px; }
+.guide-note { color: var(--warn); font-size: 11px; }

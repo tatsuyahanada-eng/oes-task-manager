@@ -7,7 +7,7 @@
  *     DB のデータや接続情報が端末に residual として残らないようにするため
  * ========================================================== */
 
-const CACHE = 'dbctl-shell-v5';
+const CACHE = 'dbctl-shell-v6';
 
 const SHELL = [
   './',
@@ -15,6 +15,7 @@ const SHELL = [
   './login.html',
   './app.js',
   './style.css',
+  './theme.css',
   './logo.svg',
   './manifest.webmanifest',
   './icons/icon-192.png',

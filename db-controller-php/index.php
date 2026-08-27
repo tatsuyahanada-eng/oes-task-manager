@@ -16,8 +16,13 @@ require __DIR__ . '/lib/users.php';
 require __DIR__ . '/lib/session.php';
 require __DIR__ . '/lib/store.php';
 require __DIR__ . '/lib/audit.php';
+require __DIR__ . '/lib/driver.php';
 require __DIR__ . '/lib/driver_mysql.php';
+require __DIR__ . '/lib/driver_pgsql.php';
 require __DIR__ . '/lib/write.php';
+require __DIR__ . '/lib/csv.php';
+require __DIR__ . '/lib/csv_routes.php';
+require __DIR__ . '/lib/theme.php';
 
 mb_internal_encoding('UTF-8');
 
@@ -47,7 +52,7 @@ $path = '/' . ltrim($path, '/');
  * ---------------------------------------------------------- */
 
 $PUBLIC_FILES = [
-    '/login.html', '/style.css', '/logo.svg', '/manifest.webmanifest', '/sw.js',
+    '/login.html', '/style.css', '/theme.css', '/logo.svg', '/manifest.webmanifest', '/sw.js',
     '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png',
 ];
 
@@ -135,6 +140,28 @@ function route_api(string $method, string $path): void
     if ($area === 'health') {
         json_out(['ok' => true, 'app' => 'DB Controller (PHP)', 'php' => PHP_VERSION]);
     }
+    if ($area === 'theme') {
+        // 読むのは全員。変えられるのは管理者だけ。
+        if ($method === 'GET') {
+            require_login();
+            json_out(theme_public());
+        }
+        if ($method === 'PUT') {
+            $me = require_role('admin');
+            $saved = theme_save(json_in());
+            audit(['action' => 'theme', 'user' => $me['username'], 'connection' => '-',
+                   'target' => '-', 'sql' => '配色・文言を変更']);
+            json_out(['ok' => true, 'applied' => $saved]);
+        }
+        if ($method === 'DELETE') {
+            $me = require_role('admin');
+            theme_reset();
+            audit(['action' => 'theme', 'user' => $me['username'], 'connection' => '-',
+                   'target' => '-', 'sql' => '配色・文言を既定へ戻す']);
+            json_out(['ok' => true, 'applied' => ['tokens' => [], 'sizes' => [], 'labels' => []]]);
+        }
+    }
+
     if ($area === 'auth')        { route_auth($method, array_slice($seg, 2)); }
     if ($area === 'connections') { route_connections($method, array_slice($seg, 2)); }
     if ($area === 'db')          { route_db($method, array_slice($seg, 2)); }
@@ -274,7 +301,10 @@ function route_connections(string $method, array $seg): void
 
     if ($head === 'drivers' && $method === 'GET') {
         require_login();
-        json_out(['drivers' => array_values(drivers())]);
+        $drivers = DbDriver::catalog();
+        foreach ($drivers as &$d) $d['guide'] = DbDriver::guide($d['id']);
+        unset($d);
+        json_out(['drivers' => $drivers]);
     }
 
     if ($head === '' && $method === 'GET') {
@@ -297,15 +327,20 @@ function route_connections(string $method, array $seg): void
     if ($head === 'test' && $method === 'POST') {
         require_role('admin');
         $in = json_in();
+        $type = (string)pick($in, 'type', '');
+        $meta = DbDriver::meta($type);
+        if ($meta === null) json_out(['error' => '対応していない DB 種別です。'], 400);
         $conn = [
-            'host' => (string)pick($in, 'host', ''), 'port' => (int)pick($in, 'port', 3306),
+            'type' => $type,
+            'host' => (string)pick($in, 'host', ''),
+            'port' => (int)pick($in, 'port', 0) ?: $meta['defaultPort'],
             'username' => (string)pick($in, 'username', ''),
             'password' => (string)pick($in, 'password', ''),
             'database' => (string)pick($in, 'database', ''),
             'ssl' => (bool)pick($in, 'ssl', false),
         ];
         $started = microtime(true);
-        $info = db_server_info(db_connect($conn));
+        $info = DbDriver::open($conn)->serverInfo();
         json_out(['ok' => true, 'elapsedMs' => (int)((microtime(true) - $started) * 1000),
                   'info' => $info]);
     }
@@ -316,7 +351,7 @@ function route_connections(string $method, array $seg): void
         if ($conn === null) json_out(['error' => '接続が見つかりません。'], 404);
         $in = json_in();
         $started = microtime(true);
-        $info = db_server_info(db_connect($conn, (string)pick($in, 'database', '')));
+        $info = DbDriver::open($conn, (string)pick($in, 'database', ''))->serverInfo();
         json_out(['ok' => true, 'elapsedMs' => (int)((microtime(true) - $started) * 1000),
                   'info' => $info]);
     }
@@ -366,36 +401,103 @@ function route_db(string $method, array $seg): void
     $conn = store_runtime($connectionId);
     if ($conn === null) json_out(['error' => '接続が見つかりません。'], 404);
 
-    $database = (string)($_GET['database'] ?? pick(json_in(), 'database', ''));
+    // CSV の取り込みでは本文が JSON ではないので、JSON として読めるときだけ見る
+    $database = (string)($_GET['database'] ?? pick(json_in_optional(), 'database', ''));
     $rest = array_slice($seg, 1);
     $head = $rest[0] ?? '';
 
     if ($head === 'info' && $method === 'GET') {
-        json_out(['info' => db_server_info(db_connect($conn, $database))]);
+        json_out(['info' => DbDriver::open($conn, $database)->serverInfo()]);
     }
 
     if ($head === 'databases' && $method === 'GET') {
-        json_out(['databases' => db_list_databases(db_connect($conn, $database))]);
+        json_out(['databases' => DbDriver::open($conn, $database)->listDatabases()]);
     }
 
     if ($head === 'schemas' && $method === 'GET') {
-        json_out(['schemas' => db_list_schemas(db_connect($conn, $database))]);
+        json_out(['schemas' => DbDriver::open($conn, $database)->listSchemas()]);
     }
 
     if ($head === 'tables' && count($rest) === 1 && $method === 'GET') {
-        $schema = assert_identifier((string)($_GET['schema'] ?? ''), 'スキーマ名');
-        json_out(['tables' => db_list_tables(db_connect($conn, $database), $schema),
+        $drv = DbDriver::open($conn, $database);
+        $schema = $drv->assertIdentifier((string)($_GET['schema'] ?? ''), 'スキーマ名');
+        json_out(['tables' => $drv->listTables($schema),
                   'schema' => $schema, 'database' => $database]);
     }
 
     if ($head === 'query' && $method === 'POST') {
         $in = json_in();
         $limit = min((int)pick($in, 'limit', 200), 1000);
-        json_out(db_run_query(db_connect($conn, $database), (string)pick($in, 'sql', ''), $limit));
+        json_out(DbDriver::open($conn, $database)
+            ->runQuery((string)pick($in, 'sql', ''), $limit));
     }
 
     if ($head === 'audit' && $method === 'GET') {
         json_out(['entries' => audit_recent(min((int)($_GET['limit'] ?? 100), 1000))]);
+    }
+
+    if ($head === 'export' && ($rest[1] ?? '') === 'schema-info' && $method === 'GET') {
+        $drv = DbDriver::open($conn, $database);
+        $schema = $drv->assertIdentifier((string)($_GET['schema'] ?? ''), 'スキーマ名');
+        json_out(csv_schema_info($drv, $schema));
+    }
+
+    // スキーマ全体を ZIP で書き出す
+    if ($head === 'export' && ($rest[1] ?? '') === 'schema.zip' && $method === 'GET') {
+        $drv = DbDriver::open($conn, $database);
+        $schema = $drv->assertIdentifier((string)($_GET['schema'] ?? ''), 'スキーマ名');
+        $enc = (string)($_GET['encoding'] ?? 'utf-8');
+        $dl  = ($_GET['delimiter'] ?? '') === 'tab' ? "\t" : (string)($_GET['delimiter'] ?? ',');
+        audit([
+            'action' => 'export', 'user' => $user['username'],
+            'connection' => $conn['name'], 'type' => $conn['type'],
+            'database' => $database, 'target' => $schema,
+            'sql' => "スキーマ一括書き出し (文字コード: {$enc})",
+        ]);
+        csv_export_schema($drv, $schema, $enc, $dl);
+    }
+
+    if ($head === 'csv' && ($rest[1] ?? '') === 'options' && $method === 'GET') {
+        json_out(['encodings' => csv_encodings(),
+                  'delimiters' => [
+                      ['id' => ',',   'label' => 'カンマ (,)'],
+                      ['id' => 'tab', 'label' => 'タブ'],
+                      ['id' => ';',   'label' => 'セミコロン (;)'],
+                  ]]);
+    }
+
+    /* ---- CSV 取り込み ---- */
+    if ($head === 'import' && in_array($rest[1] ?? '', ['preview', 'execute'], true)
+        && $method === 'POST') {
+        if (!has_role($user, 'operator')) {
+            json_out(['error' => 'この操作には「運用者」以上の権限が必要です。'], 403);
+        }
+
+        $drv = DbDriver::open($conn, $database);
+        $schema = $drv->assertIdentifier((string)($_GET['schema'] ?? ''), 'スキーマ名');
+        $table  = $drv->assertIdentifier((string)($_GET['table'] ?? ''), 'テーブル名');
+        $opts = [
+            'encoding'  => (string)($_GET['encoding'] ?? ''),
+            'delimiter' => ($_GET['delimiter'] ?? '') === 'tab' ? "\t" : (string)($_GET['delimiter'] ?? ''),
+        ];
+        $bytes = raw_in();
+        if ($bytes === '') json_out(['error' => 'CSV が空です。'], 400);
+
+        if ($rest[1] === 'preview') {
+            // 下見は DB を変更しないので、読み取り専用の接続でも通す
+            json_out(csv_preview($drv, $schema, $table, $bytes, $opts));
+        }
+
+        assert_writable($conn);
+        $result = csv_import($drv, $schema, $table, $bytes, $opts);
+        audit([
+            'action' => 'import', 'user' => $user['username'],
+            'connection' => $conn['name'], 'type' => $conn['type'],
+            'database' => $database, 'target' => "{$schema}.{$table}",
+            'affected' => $result['inserted'],
+            'sql' => 'CSV 取り込み (' . implode(', ', $result['columns']) . ')',
+        ]);
+        json_out(['ok' => true] + $result);
     }
 
     // 自由入力の更新系 SQL。PHP 版では意図的に用意していない。
@@ -413,35 +515,48 @@ function route_db(string $method, array $seg): void
 
     // /tables/:schema/:table...
     if ($head === 'tables' && count($rest) >= 3) {
-        $schema = assert_identifier(urldecode($rest[1]), 'スキーマ名');
-        $table  = assert_identifier(urldecode($rest[2]), 'テーブル名');
+        $drv = DbDriver::open($conn, $database);
+        $schema = $drv->assertIdentifier(urldecode($rest[1]), 'スキーマ名');
+        $table  = $drv->assertIdentifier(urldecode($rest[2]), 'テーブル名');
         $tail   = $rest[3] ?? '';
 
         if ($tail === '' && $method === 'GET') {
             // 画面は入れ子ではなく、直下に展開された形を読む
             json_out(array_merge(
-                ['schema' => $schema, 'table' => $table, 'database' => $database],
-                db_describe_table(db_connect($conn, $database), $schema, $table)
+                ['database' => $database],
+                $drv->describeTable($schema, $table)
             ));
         }
 
         if ($tail === 'count' && $method === 'GET') {
             $where = (string)($_GET['where'] ?? '');
             json_out(['schema' => $schema, 'table' => $table,
-                      'count' => db_count_rows(db_connect($conn, $database), $schema, $table, $where)]);
+                      'count' => $drv->countRows($schema, $table, $where)]);
+        }
+
+        // CSV 書き出し
+        if ($tail === 'export.csv' && $method === 'GET') {
+            $enc = (string)($_GET['encoding'] ?? 'utf-8');
+            $dl  = ($_GET['delimiter'] ?? '') === 'tab' ? "\t" : (string)($_GET['delimiter'] ?? ',');
+            audit([
+                'action' => 'export', 'user' => $user['username'],
+                'connection' => $conn['name'], 'type' => $conn['type'],
+                'database' => $database, 'target' => "{$schema}.{$table}",
+                'sql' => "CSV 書き出し (文字コード: {$enc})",
+            ]);
+            csv_export($drv, $schema, $table, (string)($_GET['where'] ?? ''), $enc, $dl);
         }
 
         if ($tail === 'rows' && $method === 'GET') {
             json_out(array_merge(
                 ['schema' => $schema, 'table' => $table, 'database' => $database],
-                db_select_rows(
-                db_connect($conn, $database), $schema, $table,
-                (string)($_GET['where'] ?? ''),
-                (string)($_GET['orderBy'] ?? ''),
-                (string)($_GET['orderDir'] ?? 'ASC'),
-                (int)($_GET['limit'] ?? 50),
-                (int)($_GET['offset'] ?? 0)
-            )));
+                $drv->selectRows($schema, $table,
+                    (string)($_GET['where'] ?? ''),
+                    (string)($_GET['orderBy'] ?? ''),
+                    (string)($_GET['orderDir'] ?? 'ASC'),
+                    (int)($_GET['limit'] ?? 50),
+                    (int)($_GET['offset'] ?? 0))
+            ));
         }
 
         /* ---- ここから更新系 ---- */
@@ -454,23 +569,22 @@ function route_db(string $method, array $seg): void
             assert_writable($conn);
 
             $in = json_in();
-            $pdo = db_connect($conn, $database);
-            $detail = db_describe_table($pdo, $schema, $table);
+            $detail = $drv->describeTable($schema, $table);
 
             if ($detail['type'] !== 'TABLE') {
                 json_out(['error' => 'ビューは変更できません。'], 400);
             }
 
             if ($method === 'POST') {
-                $result = insert_row($pdo, $schema, $table, (array)pick($in, 'fields', []));
+                $result = insert_row($drv, $schema, $table, (array)pick($in, 'fields', []));
                 $action = 'insert';
             } elseif ($method === 'PATCH') {
                 $key = assert_row_key($detail, (array)pick($in, 'key', []));
-                $result = update_row($pdo, $schema, $table, $key, (array)pick($in, 'fields', []));
+                $result = update_row($drv, $schema, $table, $key, (array)pick($in, 'fields', []));
                 $action = 'update';
             } else {
                 $key = assert_row_key($detail, (array)pick($in, 'key', []));
-                $result = delete_row($pdo, $schema, $table, $key);
+                $result = delete_row($drv, $schema, $table, $key);
                 $action = 'delete';
             }
 

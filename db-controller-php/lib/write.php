@@ -64,8 +64,9 @@ function normalize_value($field)
  * トランザクションで実行し、影響行数が 1 行でなければ取り消す。
  * ここが「壊さない」ことの中心。
  */
-function run_single_row(PDO $pdo, callable $operation, string $describe): array
+function run_single_row(DbDriver $drv, callable $operation, string $describe): array
 {
+    $pdo = $drv->pdo();
     $pdo->beginTransaction();
     try {
         $result = $operation();
@@ -86,72 +87,76 @@ function run_single_row(PDO $pdo, callable $operation, string $describe): array
     return $result;
 }
 
-function insert_row(PDO $pdo, string $schema, string $table, array $fields): array
+function insert_row(DbDriver $drv, string $schema, string $table, array $fields): array
 {
     if (!$fields) throw bad('追加する値がありません。');
 
     $cols = [];
     $params = [];
     foreach ($fields as $name => $field) {
-        $cols[] = assert_identifier((string)$name, '列名');
+        $cols[] = $drv->quote($drv->assertIdentifier((string)$name, '列名'));
         $params[] = normalize_value($field);
     }
 
-    $sql = 'INSERT INTO ' . q($schema) . '.' . q($table)
-         . ' (' . implode(', ', array_map('q', $cols)) . ')'
+    $sql = 'INSERT INTO ' . $drv->qualify($schema, $table)
+         . ' (' . implode(', ', $cols) . ')'
          . ' VALUES (' . implode(', ', array_fill(0, count($cols), '?')) . ')';
 
-    return run_single_row($pdo, function () use ($pdo, $sql, $params) {
+    $pdo = $drv->pdo();
+    return run_single_row($drv, function () use ($pdo, $sql, $params) {
         $st = $pdo->prepare($sql);
         $st->execute($params);
         return ['affected' => $st->rowCount(), 'sql' => $sql];
     }, '追加');
 }
 
-function update_row(PDO $pdo, string $schema, string $table, array $key, array $fields): array
+function update_row(DbDriver $drv, string $schema, string $table, array $key, array $fields): array
 {
     if (!$fields) throw bad('変更する値がありません。');
 
     $sets = [];
     $params = [];
     foreach ($fields as $name => $field) {
-        $sets[] = q(assert_identifier((string)$name, '列名')) . ' = ?';
+        $sets[] = $drv->quote($drv->assertIdentifier((string)$name, '列名')) . ' = ?';
         $params[] = normalize_value($field);
     }
 
     $wheres = [];
     foreach ($key as $name => $value) {
-        $wheres[] = q(assert_identifier((string)$name, '主キーの列名')) . ' = ?';
+        $wheres[] = $drv->quote($drv->assertIdentifier((string)$name, '主キーの列名')) . ' = ?';
         $params[] = $value;
     }
 
-    $sql = 'UPDATE ' . q($schema) . '.' . q($table)
+    $sql = 'UPDATE ' . $drv->qualify($schema, $table)
          . ' SET ' . implode(', ', $sets)
          . ' WHERE ' . implode(' AND ', $wheres);
 
-    return run_single_row($pdo, function () use ($pdo, $sql, $params) {
+    $pdo = $drv->pdo();
+    return run_single_row($drv, function () use ($pdo, $sql, $params) {
         $st = $pdo->prepare($sql);
         $st->execute($params);
-        // 接続時に MYSQL_ATTR_FOUND_ROWS を立ててあるので、
+        // MySQL は接続時に MYSQL_ATTR_FOUND_ROWS を立ててあるので、
         // rowCount() は「条件に一致した行数」を返す。
         // 値が変わらない UPDATE も 1 行として正しく数えられる。
+        // PostgreSQL はもともと一致した行数を返す。
         return ['affected' => $st->rowCount(), 'sql' => $sql];
     }, '修正');
 }
 
-function delete_row(PDO $pdo, string $schema, string $table, array $key): array
+function delete_row(DbDriver $drv, string $schema, string $table, array $key): array
 {
     $wheres = [];
     $params = [];
     foreach ($key as $name => $value) {
-        $wheres[] = q(assert_identifier((string)$name, '主キーの列名')) . ' = ?';
+        $wheres[] = $drv->quote($drv->assertIdentifier((string)$name, '主キーの列名')) . ' = ?';
         $params[] = $value;
     }
     if (!$wheres) throw bad('削除する行を特定できません。');
 
-    $sql = 'DELETE FROM ' . q($schema) . '.' . q($table) . ' WHERE ' . implode(' AND ', $wheres);
+    $sql = 'DELETE FROM ' . $drv->qualify($schema, $table) . ' WHERE ' . implode(' AND ', $wheres);
 
-    return run_single_row($pdo, function () use ($pdo, $sql, $params) {
+    $pdo = $drv->pdo();
+    return run_single_row($drv, function () use ($pdo, $sql, $params) {
         $st = $pdo->prepare($sql);
         $st->execute($params);
         return ['affected' => $st->rowCount(), 'sql' => $sql];
