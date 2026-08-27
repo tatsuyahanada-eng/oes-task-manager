@@ -1,0 +1,8 @@
+# ここには接続情報・利用者情報・暗号鍵が入っています。
+# Web からは一切読ませません。
+Require all denied
+
+<IfModule !mod_authz_core.c>
+    Order allow,deny
+    Deny from all
+</IfModule>

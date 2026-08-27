@@ -1,0 +1,478 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DB Controller</title>
+<meta name="description" content="Oracle / SQL Server / PostgreSQL を横断して参照・編集できる DB 管理ツール">
+<meta name="theme-color" content="#0d1117">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DB Ctrl">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ===== ヘッダー ===== -->
+<header class="topbar">
+  <div class="brand">
+    <img class="brand-logo" src="logo.svg" alt="WELSYS">
+    <span class="brand-divider"></span>
+    <h1>DB Controller</h1>
+  </div>
+  <nav class="desktop-tabs" id="desktopTabs">
+    <button class="dtab is-active" data-view="data">データ</button>
+    <button class="dtab" data-view="cui">CUI</button>
+    <button class="dtab" data-view="settings">設定</button>
+  </nav>
+  <div class="topbar-right">
+    <button class="icon-btn" id="btnInstall" hidden title="ホーム画面に追加">インストール</button>
+    <span class="mode-badge" id="modeBadge" hidden></span>
+    <span class="conn-status" id="connStatus">未接続</span>
+    <span class="user-chip" id="userChip" hidden>
+      <span class="who" id="userName"></span>
+      <button class="icon-btn" id="btnLogout" title="ログアウト">ログアウト</button>
+    </span>
+  </div>
+</header>
+
+<!-- 初期パスワードのままなら警告する -->
+<div class="default-pw-banner" id="defaultPwBanner" hidden>
+  <strong>初期パスワードのままです。</strong>
+  <span>設定画面から変更してください（変更するまで外部公開はできません）。</span>
+  <span class="spacer"></span>
+  <button class="btn btn-sm" id="btnChangePwFromBanner">パスワードを変更</button>
+</div>
+
+<!-- ===== 本体 ===== -->
+<div class="app" id="app">
+
+  <!-- --- ツリー --- -->
+  <section class="pane pane-tree is-active" data-view="tree">
+    <div class="pane-head">
+      <h2>データベース</h2>
+      <div class="pane-actions">
+        <button class="btn btn-sm" id="btnRefreshTree" title="再読み込み">更新</button>
+        <button class="btn btn-sm btn-primary" id="btnAddServerFromTree">+ サーバ</button>
+      </div>
+    </div>
+    <div class="tree-filter">
+      <input type="search" id="treeFilter" placeholder="テーブル名で絞り込み">
+    </div>
+    <div class="tree" id="tree">
+      <p class="empty">サーバが未登録です<br><button class="btn btn-sm btn-primary" id="btnFirstServer">+ サーバを追加</button></p>
+    </div>
+  </section>
+
+  <!-- --- データ --- -->
+  <section class="pane pane-data" data-view="data">
+    <div class="pane-head">
+      <h2 id="dataTitle">データ</h2>
+      <div class="pane-actions">
+        <button class="btn btn-sm" id="btnColumns">列定義</button>
+        <button class="btn btn-sm" id="btnCsv">CSV</button>
+        <button class="btn btn-sm btn-write" id="btnAddRow" hidden>+ 行追加</button>
+      </div>
+    </div>
+
+    <div class="data-controls">
+      <input type="text" id="whereInput" placeholder="WHERE 条件（例: status = 'A'）">
+      <select id="limitSelect">
+        <option value="25">25件</option>
+        <option value="50" selected>50件</option>
+        <option value="100">100件</option>
+        <option value="200">200件</option>
+      </select>
+      <button class="btn btn-sm btn-primary" id="btnReload">表示</button>
+    </div>
+
+    <div class="grid-wrap" id="gridWrap">
+      <p class="empty">左のツリーからテーブルを選んでください</p>
+    </div>
+
+    <div class="pager">
+      <button class="btn btn-sm" id="btnPrev">‹ 前</button>
+      <span id="pagerInfo">-</span>
+      <button class="btn btn-sm" id="btnNext">次 ›</button>
+    </div>
+  </section>
+
+  <!-- --- CUI --- -->
+  <section class="pane pane-cui" data-view="cui">
+    <div class="pane-head">
+      <h2>CUI コンソール</h2>
+      <div class="pane-actions">
+        <button class="btn btn-sm" id="btnCuiHelp">help</button>
+        <button class="btn btn-sm" id="btnCuiClear">clear</button>
+      </div>
+    </div>
+    <div class="console" id="console"></div>
+    <form class="console-input" id="consoleForm" autocomplete="off">
+      <span class="prompt" id="consolePrompt">$</span>
+      <input type="text" id="consoleInput" placeholder="SQL または \help" spellcheck="false"
+             autocapitalize="off" autocorrect="off">
+      <button class="btn btn-sm btn-primary" type="submit">実行</button>
+    </form>
+  </section>
+
+  <!-- --- 設定 --- -->
+  <section class="pane pane-settings" data-view="settings">
+    <div class="pane-head">
+      <h2>設定</h2>
+      <div class="pane-actions">
+        <button class="btn btn-sm" id="btnAudit">操作履歴</button>
+        <button class="btn btn-sm btn-primary" id="btnAddServer">+ サーバを追加</button>
+      </div>
+    </div>
+    <div class="server-list" id="serverList"></div>
+
+    <div class="settings-about">
+      <h3>アカウント</h3>
+      <dl>
+        <dt>ログイン中</dt><dd id="settingsUser">-</dd>
+        <dt>権限</dt><dd id="settingsRole">-</dd>
+        <dt>自動ログアウト</dt><dd id="settingsIdle">-</dd>
+      </dl>
+      <div class="settings-actions">
+        <button class="btn btn-sm" id="btnChangePw">パスワードを変更</button>
+        <button class="btn btn-sm" id="btnLogout2">ログアウト</button>
+      </div>
+
+      <div id="usersBlock" hidden>
+        <h3>
+          利用者
+          <button class="btn btn-sm btn-primary" id="btnAddUser">+ 利用者を追加</button>
+        </h3>
+        <div class="user-list" id="userList"></div>
+        <p class="hint">
+          <strong>管理者</strong>… 利用者と接続先の管理、データの変更 /
+          <strong>運用者</strong>… データの参照と変更 /
+          <strong>閲覧者</strong>… 参照と CSV 書き出しのみ
+        </p>
+      </div>
+
+      <h3>このアプリについて</h3>
+      <dl>
+        <dt>接続情報の保存先</dt><dd>サーバ側の <code>data/connections.json</code>（パスワードは AES-256-GCM で暗号化）</dd>
+        <dt>安全のしくみ</dt><dd>接続は既定で読み取り専用。変更は主キーで特定した 1 行ずつ、実行前に確認</dd>
+        <dt>オフライン</dt><dd>画面の外枠のみキャッシュ。DB のデータは端末に保存しません</dd>
+      </dl>
+    </div>
+  </section>
+</div>
+
+<!-- ===== 下部ナビ（スマホ）===== -->
+<nav class="tabbar" id="tabbar">
+  <button class="tab is-active" data-view="tree"><span class="tab-icon">▤</span>ツリー</button>
+  <button class="tab" data-view="data"><span class="tab-icon">▦</span>データ</button>
+  <button class="tab" data-view="cui"><span class="tab-icon">&gt;_</span>CUI</button>
+  <button class="tab" data-view="settings"><span class="tab-icon">⚙</span>設定</button>
+</nav>
+
+<!-- ===== サーバ設定モーダル ===== -->
+<div class="sheet-backdrop" id="serverModal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="serverModalTitle">
+    <div class="sheet-head">
+      <h2 id="serverModalTitle">サーバを追加</h2>
+      <button class="icon-btn" id="btnCloseServer" aria-label="閉じる">✕</button>
+    </div>
+    <form id="serverForm" autocomplete="off">
+      <input type="hidden" name="id">
+
+      <label class="field">
+        <span>表示名 <em>*</em></span>
+        <input name="name" required placeholder="本番Oracle（移行元）">
+      </label>
+
+      <div class="field-row">
+        <label class="field">
+          <span>DB種別 <em>*</em></span>
+          <select name="type" id="typeSelect" required></select>
+          <small class="field-hint" id="driverHint" hidden></small>
+        </label>
+        <label class="field field-narrow">
+          <span>用途</span>
+          <select name="role">
+            <option value="">未設定</option>
+            <option value="source">移行元</option>
+            <option value="target">移行先</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="field-row">
+        <label class="field">
+          <span>ホスト <em>*</em></span>
+          <input name="host" required placeholder="db.example.local" inputmode="url">
+        </label>
+        <label class="field field-narrow">
+          <span>ポート</span>
+          <input name="port" type="number" inputmode="numeric" min="1" max="65535" placeholder="自動">
+        </label>
+      </div>
+
+      <div class="field-row" data-for="oracle" hidden>
+        <label class="field">
+          <span>サービス名</span>
+          <input name="serviceName" placeholder="ORCLPDB1">
+        </label>
+        <label class="field">
+          <span>SID</span>
+          <input name="sid" placeholder="ORCL">
+        </label>
+      </div>
+
+      <div class="field-row" data-for="mssql postgres mysql" hidden>
+        <label class="field">
+          <span>既定データベース</span>
+          <input name="database" placeholder="接続後に切り替えできます">
+        </label>
+        <label class="field" data-for="mssql" hidden>
+          <span>インスタンス名</span>
+          <input name="instanceName" placeholder="SQLEXPRESS（任意）">
+        </label>
+      </div>
+
+      <div class="field-row">
+        <label class="field">
+          <span>ユーザー名 <em>*</em></span>
+          <input name="username" required autocapitalize="off">
+        </label>
+        <label class="field">
+          <span>パスワード</span>
+          <input name="password" type="password" id="passwordInput" placeholder="暗号化して保存されます">
+          <small class="hint" id="passwordHint" hidden>空欄なら既存のパスワードを保持します</small>
+        </label>
+      </div>
+
+      <div class="check-row">
+        <label class="check" data-for="mssql" hidden>
+          <input type="checkbox" name="encrypt" checked> 接続を暗号化
+        </label>
+        <label class="check" data-for="mssql" hidden>
+          <input type="checkbox" name="trustServerCertificate" checked> 証明書を信頼
+        </label>
+        <label class="check" data-for="postgres mysql" hidden>
+          <input type="checkbox" name="ssl"> SSL を使用
+        </label>
+      </div>
+
+      <div class="safety-block">
+        <label class="check check-strong">
+          <input type="checkbox" name="readOnly" id="readOnlyInput" checked>
+          読み取り専用（追加・修正・削除を禁止）
+        </label>
+        <p class="notice" id="readOnlyNotice"></p>
+      </div>
+
+      <label class="field">
+        <span>メモ</span>
+        <input name="note" placeholder="用途や注意点">
+      </label>
+
+      <p class="form-message" id="serverFormMessage"></p>
+
+      <div class="sheet-actions">
+        <button type="button" class="btn" id="btnTestServer">接続テスト</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-danger" id="btnDeleteServer" hidden>削除</button>
+        <button type="submit" class="btn btn-primary">保存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== 行エディタ ===== -->
+<div class="sheet-backdrop" id="rowModal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rowModalTitle">
+    <div class="sheet-head">
+      <h2 id="rowModalTitle">行を編集</h2>
+      <button class="icon-btn" id="btnCloseRow" aria-label="閉じる">✕</button>
+    </div>
+    <p class="sheet-sub" id="rowModalSub"></p>
+    <div class="row-editor" id="rowEditor"></div>
+    <p class="form-message" id="rowFormMessage"></p>
+    <div class="sheet-actions">
+      <span class="muted" id="rowChangeCount"></span>
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="btnCancelRow">やめる</button>
+      <button type="button" class="btn btn-write" id="btnSubmitRow">確認へ</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 実行確認 ===== -->
+<div class="sheet-backdrop" id="confirmModal" hidden>
+  <div class="sheet sheet-narrow" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+    <div class="sheet-head">
+      <h2 id="confirmTitle">確認</h2>
+      <button class="icon-btn" id="btnCloseConfirm" aria-label="閉じる">✕</button>
+    </div>
+    <div id="confirmBody"></div>
+    <p class="section-label">実行される SQL</p>
+    <pre class="sql-block" id="confirmSql"></pre>
+    <label class="check check-strong" id="confirmAllRowsWrap" hidden>
+      <input type="checkbox" id="confirmAllRows">
+      このテーブルの<strong>全行</strong>が対象になることを理解しました
+    </label>
+    <p class="form-message" id="confirmMessage"></p>
+    <div class="sheet-actions">
+      <span class="spacer"></span>
+      <button type="button" class="btn" id="btnCancelConfirm">やめる</button>
+      <button type="button" class="btn btn-write" id="btnRunConfirm">実行</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== 列定義 ===== -->
+<div class="sheet-backdrop" id="columnsModal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="columnsTitle">
+    <div class="sheet-head">
+      <h2 id="columnsTitle">列定義</h2>
+      <button class="icon-btn" id="btnCloseColumns" aria-label="閉じる">✕</button>
+    </div>
+    <div id="columnsBody"></div>
+  </div>
+</div>
+
+<!-- ===== パスワード変更 ===== -->
+<div class="sheet-backdrop" id="pwModal" hidden>
+  <div class="sheet sheet-narrow" role="dialog" aria-modal="true" aria-labelledby="pwTitle">
+    <div class="sheet-head">
+      <h2 id="pwTitle">パスワードの変更</h2>
+      <button class="icon-btn" id="btnClosePw" aria-label="閉じる">✕</button>
+    </div>
+    <form id="pwForm" autocomplete="off">
+      <label class="field">
+        <span>現在のパスワード</span>
+        <input type="password" id="pwCurrent" required autocomplete="current-password">
+      </label>
+      <label class="field">
+        <span>新しいパスワード</span>
+        <input type="password" id="pwNew" required autocomplete="new-password">
+      </label>
+      <label class="field">
+        <span>新しいパスワード（確認）</span>
+        <input type="password" id="pwConfirm" required autocomplete="new-password">
+      </label>
+      <div class="notice">
+        10 文字以上で、英大文字・小文字・数字をすべて含めてください。<br>
+        変更すると<strong>すべての端末でログアウト</strong>されます。
+      </div>
+      <p class="form-message" id="pwMessage"></p>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btnCancelPw">やめる</button>
+        <button type="submit" class="btn btn-primary">変更する</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== CSV 入出力 ===== -->
+<div class="sheet-backdrop" id="csvModal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="csvTitle">
+    <div class="sheet-head">
+      <h2 id="csvTitle">CSV 入出力</h2>
+      <button class="icon-btn" id="btnCloseCsv" aria-label="閉じる">✕</button>
+    </div>
+    <p class="sheet-sub" id="csvTarget"></p>
+
+    <div class="seg" id="csvTabs">
+      <button class="seg-btn is-active" data-csv="export">出力</button>
+      <button class="seg-btn" data-csv="import">取り込み</button>
+      <button class="seg-btn" data-csv="backup">一括バックアップ</button>
+    </div>
+
+    <!-- 共通の書式設定 -->
+    <div class="field-row">
+      <label class="field">
+        <span>文字コード</span>
+        <select id="csvEncoding"></select>
+      </label>
+      <label class="field">
+        <span>区切り文字</span>
+        <select id="csvDelimiter"></select>
+      </label>
+    </div>
+
+    <!-- 出力 -->
+    <section class="csv-panel is-active" data-csv-panel="export">
+      <label class="check">
+        <input type="checkbox" id="csvUseWhere" checked>
+        いまの WHERE 条件で絞り込む
+      </label>
+      <p class="muted" id="csvWhereText"></p>
+      <div class="notice">
+        テーブルの<strong>全行</strong>を出力します（絞り込みを指定した場合はその結果）。
+        画面に表示している件数とは関係ありません。
+      </div>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-primary" id="btnExportTable">このテーブルを出力</button>
+      </div>
+    </section>
+
+    <!-- 取り込み -->
+    <section class="csv-panel" data-csv-panel="import">
+      <div class="notice danger" id="csvImportReadonly" hidden>
+        この接続は<strong>読み取り専用</strong>です。取り込むには設定で解除してください。
+      </div>
+      <label class="field">
+        <span>CSV ファイル</span>
+        <input type="file" id="csvFile" accept=".csv,.txt,text/csv">
+      </label>
+      <label class="check">
+        <input type="checkbox" id="csvHasHeader" checked> 1 行目は見出し
+      </label>
+      <label class="check">
+        <input type="checkbox" id="csvEmptyAsNull" checked> 空欄は NULL として取り込む
+      </label>
+      <p class="muted">文字コードと区切り文字は「自動」で判定します（上で明示も可能）。</p>
+      <div id="csvPreview"></div>
+      <p class="form-message" id="csvImportMessage"></p>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btnCsvPreview">内容を確認</button>
+        <button type="button" class="btn btn-write" id="btnCsvImport" disabled>取り込む</button>
+      </div>
+    </section>
+
+    <!-- 一括バックアップ -->
+    <section class="csv-panel" data-csv-panel="backup">
+      <div class="notice">
+        いま選んでいるスキーマの<strong>全テーブル</strong>を CSV にして、ZIP にまとめて保存します。
+        テーブルごとに 1 ファイル、内容の一覧も同梱します。
+      </div>
+      <label class="check">
+        <input type="checkbox" id="csvIncludeViews"> ビューも含める
+      </label>
+      <div id="csvBackupInfo" class="muted"></div>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-primary" id="btnBackupZip">ZIP でまとめて保存</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ===== 操作履歴 ===== -->
+<div class="sheet-backdrop" id="auditModal" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="auditTitle">
+    <div class="sheet-head">
+      <h2 id="auditTitle">操作履歴</h2>
+      <button class="icon-btn" id="btnCloseAudit" aria-label="閉じる">✕</button>
+    </div>
+    <p class="sheet-sub">このツールから実行された更新操作の記録です。</p>
+    <div class="audit-list" id="auditList"></div>
+  </div>
+</div>
+
+<div class="toast-stack" id="toastStack"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

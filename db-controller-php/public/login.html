@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DB Controller — ログイン</title>
+<meta name="theme-color" content="#0d1117">
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="login-body">
+
+<main class="login-wrap">
+  <div class="login-card">
+    <div class="login-brand">
+      <img class="login-logo" src="logo.svg" alt="WELSYS">
+      <h1>DB Controller</h1>
+      <p class="login-sub">社内用 データベース管理ツール</p>
+    </div>
+
+    <form id="loginForm" autocomplete="off">
+      <label class="field">
+        <span>ユーザー名</span>
+        <input name="username" id="username" required autocapitalize="off" autocorrect="off"
+               spellcheck="false" autocomplete="username" enterkeyhint="next">
+      </label>
+
+      <label class="field">
+        <span>パスワード</span>
+        <div class="pw-wrap">
+          <input name="password" id="password" type="password" required
+                 autocomplete="current-password" enterkeyhint="go">
+          <button type="button" class="pw-toggle" id="pwToggle" aria-label="パスワードを表示">表示</button>
+        </div>
+      </label>
+
+      <p class="login-message" id="loginMessage" role="alert"></p>
+
+      <button type="submit" class="btn btn-primary login-submit" id="loginSubmit">ログイン</button>
+    </form>
+
+    <p class="login-note">
+      このツールは DB の接続情報を保持します。共有端末では、使い終わったら必ずログアウトしてください。
+    </p>
+  </div>
+
+  <p class="login-foot">WELSYS &middot; DB Controller</p>
+</main>
+
+<script>
+'use strict';
+
+const form = document.getElementById('loginForm');
+const message = document.getElementById('loginMessage');
+const submit = document.getElementById('loginSubmit');
+
+/* パスワードの表示切り替え */
+const pw = document.getElementById('password');
+document.getElementById('pwToggle').addEventListener('click', (ev) => {
+  const shown = pw.type === 'text';
+  pw.type = shown ? 'password' : 'text';
+  ev.target.textContent = shown ? '表示' : '隠す';
+  ev.target.setAttribute('aria-label', shown ? 'パスワードを表示' : 'パスワードを隠す');
+  pw.focus();
+});
+
+/* すでにログイン済みならアプリへ */
+(async () => {
+  try {
+    const res = await fetch('api/auth/me', { credentials: 'same-origin' });
+    if (res.ok) location.replace('./');
+  } catch { /* オフラインなどはそのままログイン画面 */ }
+})();
+
+form.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  message.className = 'login-message';
+  message.textContent = '';
+  submit.disabled = true;
+  submit.textContent = 'ログイン中…';
+
+  try {
+    const res = await fetch('api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        username: document.getElementById('username').value,
+        password: pw.value,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      message.className = 'login-message is-error';
+      message.textContent = data.error || `ログインできませんでした (HTTP ${res.status})`;
+      pw.value = '';
+      pw.focus();
+      return;
+    }
+    location.replace('./');
+  } catch (err) {
+    message.className = 'login-message is-error';
+    message.textContent = 'サーバーに接続できません。起動しているか確認してください。';
+  } finally {
+    submit.disabled = false;
+    submit.textContent = 'ログイン';
+  }
+});
+
+document.getElementById('username').focus();
+</script>
+</body>
+</html>

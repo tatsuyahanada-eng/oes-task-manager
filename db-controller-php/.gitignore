@@ -1,0 +1,4 @@
+data/*.json
+data/*.log
+data/.masterkey
+data/sessions/
