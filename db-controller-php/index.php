@@ -11,7 +11,9 @@
  *    足さないでください。足すと、この案内自体が表示できなくなります。
  */
 
-$need = '7.4.0';
+require __DIR__ . '/lib/version.php';
+
+$need = DBC_MIN_PHP;
 
 if (version_compare(PHP_VERSION, $need, '<')) {
     header('Content-Type: text/html; charset=UTF-8');

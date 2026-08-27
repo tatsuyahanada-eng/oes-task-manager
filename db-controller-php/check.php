@@ -17,10 +17,24 @@
 header('Content-Type: text/html; charset=UTF-8');
 header('X-Robots-Tag: noindex, nofollow');
 
+// 版の情報。読めなければ古いファイルのまま。
+$verFile = __DIR__ . '/lib/version.php';
+if (file_exists($verFile)) { include_once $verFile; }
+
 $rows = array();
 function add($section, $label, $status, $detail) {
     global $rows;
     $rows[$section][] = array('label' => $label, 'status' => $status, 'detail' => $detail);
+}
+
+/* ---------------- 版の確認 ---------------- */
+
+if (defined('DBC_VERSION')) {
+    add('版', 'DB Controller', 'ok', DBC_VERSION . ' — 新しいファイルに入れ替わっています');
+} else {
+    add('版', 'DB Controller', 'ng',
+        '<strong>古いファイルのままです。</strong>lib/version.php がありません。'
+        . 'tar を展開して、フォルダ全体を上書きしてください。');
 }
 
 /* ---------------- PHP 本体 ---------------- */
@@ -55,8 +69,9 @@ foreach ($exts as $ext => $why) {
 /* ---------------- ファイルの配置 ---------------- */
 
 $files = array(
-    'index.php'        => '入口',
+    'index.php'        => '入口（3KB 程度。25KB なら古い版です）',
     'app.php'          => '本体',
+    'lib/version.php'  => '版の情報',
     'lib/util.php'     => '共通処理',
     'lib/driver.php'   => 'DB ドライバ',
     'public/index.html'=> '画面',
