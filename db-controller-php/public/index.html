@@ -262,7 +262,15 @@
         </label>
         <label class="field">
           <span>パスワード</span>
-          <input name="password" type="password" id="passwordInput" placeholder="暗号化して保存されます">
+          <!--
+            autocomplete="new-password" を必ず付けること。
+            付けないとブラウザが「このサイトのログインパスワード」を
+            ここへ自動入力してしまい、DB の認証が理由不明で失敗する。
+            name も password 以外にして、自動入力の対象になりにくくする。
+          -->
+          <input name="dbPassword" type="password" id="passwordInput"
+                 autocomplete="new-password" autocorrect="off" autocapitalize="off"
+                 spellcheck="false" placeholder="暗号化して保存されます">
           <small class="hint" id="passwordHint" hidden>空欄なら既存のパスワードを保持します</small>
         </label>
       </div>

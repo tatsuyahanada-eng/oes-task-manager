@@ -1106,7 +1106,7 @@ function openServerModal(id) {
   form.elements.sid.value = v.sid || '';
   form.elements.instanceName.value = v.instanceName || '';
   form.elements.username.value = v.username || '';
-  form.elements.password.value = '';
+  form.elements.dbPassword.value = '';
   form.elements.role.value = v.role || '';
   form.elements.note.value = v.note || '';
   form.elements.encrypt.checked = v.encrypt !== false;
@@ -1208,6 +1208,10 @@ $('#btnCloseServer').addEventListener('click', closeServerModal);
 
 function formPayload() {
   const d = Object.fromEntries(new FormData(form).entries());
+  // 入力欄の name は dbPassword にしてある（ブラウザの自動入力よけ）。
+  // サーバへは password として送る。
+  d.password = d.dbPassword || '';
+  delete d.dbPassword;
   const p = {
     ...d,
     port: d.port ? Number(d.port) : undefined,
