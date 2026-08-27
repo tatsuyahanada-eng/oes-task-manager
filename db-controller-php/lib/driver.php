@@ -44,7 +44,7 @@ abstract class DbDriver
      */
     public static function guide(string $type): array
     {
-        return match ($type) {
+        $guides = [
             'mysql' => [
                 'title' => 'ロリポップなど共用サーバの MySQL',
                 'where' => '管理画面「サーバーの管理・設定 → データベース」',
@@ -101,8 +101,9 @@ abstract class DbDriver
                                    'note' => 'Supabase は SSL 必須なので、指定に関わらず有効にします'],
                 ],
             ],
-            default => ['title' => '', 'where' => '', 'fields' => []],
-        };
+        ];
+        return $guides[$type] ?? ['title' => '', 'where' => '', 'fields' => []];
+
     }
 
     public static function meta(string $type): ?array
@@ -124,11 +125,8 @@ abstract class DbDriver
                 . "「{$meta['label']}」は使えません。サーバの設定を確認してください。", 500);
         }
 
-        return match ($type) {
-            'mysql'    => new MysqlDriver($conn, $database),
-            'postgres',
-            'supabase' => new PgsqlDriver($conn, $database),
-        };
+        if ($type === 'mysql') return new MysqlDriver($conn, $database);
+        return new PgsqlDriver($conn, $database);
     }
 
     public function pdo(): PDO { return $this->pdo; }

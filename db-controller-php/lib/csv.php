@@ -28,11 +28,10 @@ function csv_encodings(): array
 /** 内部の文字コード名へ。 */
 function csv_charset(string $id): string
 {
-    return match ($id) {
-        'shift_jis' => 'CP932',   // 「Shift_JIS」より CP932 の方が扱える字が多い
-        'euc-jp'    => 'eucJP-win',
-        default     => 'UTF-8',
-    };
+    // 「Shift_JIS」より CP932 の方が扱える字が多い
+    if ($id === 'shift_jis') return 'CP932';
+    if ($id === 'euc-jp')    return 'eucJP-win';
+    return 'UTF-8';
 }
 
 /* ------------------------------------------------------------

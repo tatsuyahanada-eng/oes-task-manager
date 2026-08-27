@@ -1,0 +1,10 @@
+# 最小構成の .htaccess
+#
+# 通常の .htaccess で HTTP 500 が出る場合、
+# こちらを .htaccess という名前にして使ってください。
+# 必要最低限（index.php への集約）だけを行います。
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^ index.php [QSA,L]
+</IfModule>
