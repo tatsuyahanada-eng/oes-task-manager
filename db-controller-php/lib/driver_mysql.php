@@ -56,11 +56,14 @@ class MysqlDriver extends DbDriver
     private function explain(PDOException $e, string $user, string $db): string
     {
         $m = $e->getMessage();
+        // 説明を付けても、元のメッセージは必ず最後に残す。
+        // 分類を誤ったときに、こちらが手掛かりになる。
+        $raw = "\n\n［サーバからの元のメッセージ］\n" . $m;
 
         // 1044: ユーザーは正しいが、その DB を使う権限が無い
         if (str_contains($m, '[1044]')) {
             return "ユーザー「{$user}」に、データベース「{$db}」を使う権限がありません。"
-                 . '管理画面で、そのデータベースに割り当てられているユーザー名を確認してください。';
+                 . '管理画面で、そのデータベースに割り当てられているユーザー名を確認してください。' . $raw;
         }
 
         // 1045: ユーザー名かパスワードが違う
@@ -73,14 +76,17 @@ class MysqlDriver extends DbDriver
                  . "\n　ブラウザがログイン用のパスワードを自動で入れてしまうことがあります。"
                  . "\n　欄をいったん空にして、管理画面の値を貼り付けてください。"
                  . "\n・「SSL を使用」を外して試したか"
-                 . "\n　SSL 必須の設定になっていない限り、共用サーバでは通常オフです。";
+                 . "\n　SSL 必須の設定になっていない限り、共用サーバでは通常オフです。"
+                 . "\n・phpMyAdmin に同じユーザー名とパスワードで入れるか"
+                 . "\n　入れないなら認証情報そのものが違います。入れるならこちらの設定の問題です。"
+                 . $raw;
         }
 
         // 1049: データベース名が違う
         if (str_contains($m, '[1049]') || str_contains($m, 'Unknown database')) {
             return "データベース「{$db}」が見つかりません。"
                  . '管理画面の「データベース名」を、そのまま写してください。'
-                 . 'ハイフンを含む名前（LAA1234567-shop など）でも構いません。';
+                 . 'ハイフンを含む名前（LAA1234567-shop など）でも構いません。' . $raw;
         }
 
         // ホスト名を引けない。MySQL は 2005 ではなく
@@ -88,19 +94,19 @@ class MysqlDriver extends DbDriver
         if (str_contains($m, '[2005]') || str_contains($m, 'Unknown MySQL server host')
             || str_contains($m, 'getaddrinfo')) {
             return 'ホスト名が見つかりません。管理画面の「サーバー」欄を確認してください。'
-                 . '（.lan で終わる名前は、そのサーバの中からしか引けません）';
+                 . '（.lan で終わる名前は、そのサーバの中からしか引けません）' . $raw;
         }
 
         // 2002 / 2003: 届かない
         if (str_contains($m, '[2002]') || str_contains($m, '[2003]')
             || str_contains($m, 'Connection refused') || str_contains($m, 'timed out')) {
-            return 'サーバへ届きませんでした。ホスト名とポート（通常 3306）を確認してください。';
+            return 'サーバへ届きませんでした。ホスト名とポート（通常 3306）を確認してください。' . $raw;
         }
 
         // 1130: この接続元からは受け付けない
         if (str_contains($m, '[1130]')) {
             return "この場所からの接続が許可されていません。"
-                 . 'DB の利用者に、接続元の制限がかかっている可能性があります。';
+                 . 'DB の利用者に、接続元の制限がかかっている可能性があります。' . $raw;
         }
 
         return 'DB へ接続できませんでした: ' . $m;

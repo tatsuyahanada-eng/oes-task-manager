@@ -340,12 +340,23 @@ function route_connections(string $method, array $seg): void
         $type = (string)pick($in, 'type', '');
         $meta = DbDriver::meta($type);
         if ($meta === null) json_out(['error' => '対応していない DB 種別です。'], 400);
+        // パスワード欄が空のときは「変更しない」という意味なので、
+        // 既存の接続を編集中なら保存済みのパスワードを使う。
+        // ここで拾わないと、パスワードなしで接続を試みて
+        // 「認証失敗」という誤った結果を返してしまう。
+        $password = (string)pick($in, 'password', '');
+        $id = (string)pick($in, 'id', '');
+        if ($password === '' && $id !== '') {
+            $saved = store_runtime($id);
+            if ($saved !== null) $password = (string)$saved['password'];
+        }
+
         $conn = [
             'type' => $type,
             'host' => (string)pick($in, 'host', ''),
             'port' => (int)pick($in, 'port', 0) ?: $meta['defaultPort'],
             'username' => (string)pick($in, 'username', ''),
-            'password' => (string)pick($in, 'password', ''),
+            'password' => $password,
             'database' => (string)pick($in, 'database', ''),
             'ssl' => (bool)pick($in, 'ssl', false),
         ];

@@ -1229,6 +1229,9 @@ $('#btnTestServer').addEventListener('click', async () => {
   m.className = 'form-message';
   m.textContent = '接続テスト中…';
   try {
+    // formPayload() には隠しフィールドの id も入る。
+    // パスワード欄が空（＝変更しない）のとき、サーバ側は
+    // その id の保存済みパスワードを使う。
     const r = await api('/api/connections/test', { method: 'POST', body: formPayload() });
     m.className = 'form-message ok';
     m.textContent = `接続成功（${r.elapsedMs}ms）${String(r.info.version).split(/[\r\n]/)[0].slice(0, 46)}`;
