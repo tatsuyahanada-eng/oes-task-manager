@@ -1,20 +1,30 @@
 # DB Controller (PHP 版)
 #
 # すべてのリクエストを index.php へ集める。
-# 静的ファイルも index.php が配るので、ログインしていない人には渡らない。
+# 静的ファイルも index.php が配るので、ログインしていない人には渡りません。
 
 <IfModule mod_rewrite.c>
     RewriteEngine On
-    RewriteBase /
 
-    # 実在するファイルでも、index.php を通す（ログイン確認のため）
+    # RewriteBase は書きません。
+    # 書いてしまうと、サブディレクトリに置いたときに
+    # サイトの一番上へ飛ばそうとして 404 になります。
+    # 省略すると、この .htaccess のある場所が自動で基準になります。
+
+    # 実在するファイルでも index.php を通す（ログイン確認のため）
     RewriteRule ^ index.php [QSA,L]
 </IfModule>
 
-# 万一 mod_rewrite が効かない環境でも、大事なものは直接読ませない
-<FilesMatch "\.(json|log|masterkey)$">
-    Require all denied
-</FilesMatch>
+# 万一 mod_rewrite が効かない環境でも、大事なものは直接読ませない。
+#
+# Apache 2.4 と 2.2 で書き方が違います。
+# どちらか片方しか解釈できないので、必ず IfModule で囲みます。
+# 囲まずに書くと、対応していない側で 500 エラーになります。
+<IfModule mod_authz_core.c>
+    <FilesMatch "\.(json|log|masterkey)$">
+        Require all denied
+    </FilesMatch>
+</IfModule>
 
 <IfModule !mod_authz_core.c>
     <FilesMatch "\.(json|log|masterkey)$">

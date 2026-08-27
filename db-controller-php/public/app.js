@@ -44,10 +44,26 @@ const state = {
  * API
  * ---------------------------------------------------------- */
 
+/**
+ * API の基準パス。
+ *
+ * このアプリはサブディレクトリに置かれることがある
+ * （例: https://例.com/AI-TOOL/DBControler/）。
+ * "/api/..." と絶対パスで呼ぶと、ブラウザはドメインの直下を見にいってしまい、
+ * サブディレクトリでは全部 404 になる。
+ * index.html の位置から基準を求め、そこからの相対で呼ぶ。
+ */
+const BASE = location.pathname.replace(/\/[^/]*$/, '');
+
+/** "/api/..." を、いまの設置場所に合わせた URL にする。 */
+function url(path) {
+  return path.startsWith('/') ? BASE + path : path;
+}
+
 async function api(path, options = {}) {
   let res;
   try {
-    res = await fetch(path, {
+    res = await fetch(url(path), {
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
       ...options,
@@ -65,7 +81,7 @@ async function api(path, options = {}) {
   }
   // セッションが切れていたらログイン画面へ戻す
   if (res.status === 401 && payload.needLogin) {
-    location.replace('login.html');
+    location.replace(BASE + '/login.html');
     throw new Error('ログインが必要です。');
   }
   if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
@@ -1331,7 +1347,7 @@ function applyPermissions() {
 async function doLogout() {
   if (!confirm('ログアウトします。よろしいですか？')) return;
   try { await api('/api/auth/logout', { method: 'POST' }); } catch { /* 失敗しても画面は戻す */ }
-  location.replace('login.html');
+  location.replace(BASE + '/login.html');
 }
 
 $('#btnLogout').addEventListener('click', doLogout);
@@ -1372,7 +1388,7 @@ $('#pwForm').addEventListener('submit', async (ev) => {
     });
     msg.className = 'form-message ok';
     msg.textContent = r.message;
-    setTimeout(() => location.replace('login.html'), 2500);
+    setTimeout(() => location.replace(BASE + '/login.html'), 2500);
   } catch (err) {
     msg.className = 'form-message err';
     msg.textContent = err.message;
@@ -1449,9 +1465,9 @@ function csvQuery(extra = {}) {
 }
 
 /** ブラウザにダウンロードさせる。 */
-function download(url) {
+function download(path) {
   const a = document.createElement('a');
-  a.href = url;
+  a.href = url(path);
   a.rel = 'noopener';
   document.body.appendChild(a);
   a.click();
@@ -1517,13 +1533,13 @@ function importQuery(extra = {}) {
 }
 
 async function postCsv(path, buffer) {
-  const res = await fetch(path, {
+  const res = await fetch(url(path), {
     method: 'POST',
     headers: { 'Content-Type': 'text/csv' },
     credentials: 'same-origin',
     body: buffer,
   });
-  if (res.status === 401) { location.replace('login.html'); throw new Error('ログインが必要です。'); }
+  if (res.status === 401) { location.replace(BASE + '/login.html'); throw new Error('ログインが必要です。'); }
   const text = await res.text();
   let payload = {};
   if (text) { try { payload = JSON.parse(text); } catch { throw new Error(`応答を解釈できません (HTTP ${res.status})`); } }

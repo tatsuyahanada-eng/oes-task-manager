@@ -1,6 +1,11 @@
 # ここには接続情報・利用者情報・暗号鍵が入っています。
 # Web からは一切読ませません。
-Require all denied
+#
+# Apache 2.4 と 2.2 で書き方が違うため、両方を IfModule で囲んでいます。
+# 囲まずに書くと、対応していない側で 500 エラーになります。
+<IfModule mod_authz_core.c>
+    Require all denied
+</IfModule>
 
 <IfModule !mod_authz_core.c>
     Order allow,deny
