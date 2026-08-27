@@ -1107,6 +1107,8 @@ function openServerModal(id) {
   form.elements.instanceName.value = v.instanceName || '';
   form.elements.username.value = v.username || '';
   form.elements.dbPassword.value = '';
+  // 開くたびに readonly へ戻し、自動入力の隙を作らない
+  form.elements.dbPassword.setAttribute('readonly', '');
   form.elements.role.value = v.role || '';
   form.elements.note.value = v.note || '';
   form.elements.encrypt.checked = v.encrypt !== false;
@@ -1198,6 +1200,12 @@ function applyReadOnlyNotice() {
     ? '参照だけを行います。この接続からはデータを変更できません。<br><strong>移行元はこのままを推奨します。</strong>'
     : '<strong>書き込みを許可します。</strong><br>行の追加・修正・削除と更新系 SQL が可能になります。変更は主キーで特定した 1 行ずつ、実行前の確認を経て行われます。';
 }
+
+// パスワード欄は readonly の状態で置いてある（自動入力よけ）。
+// 実際に触られたときだけ入力できるようにする。
+['focus', 'click', 'touchstart'].forEach((ev) => {
+  $('#passwordInput').addEventListener(ev, function () { this.removeAttribute('readonly'); });
+});
 
 $('#typeSelect').addEventListener('change', applyTypeVisibility);
 $('#readOnlyInput').addEventListener('change', applyReadOnlyNotice);

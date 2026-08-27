@@ -268,7 +268,14 @@
             ここへ自動入力してしまい、DB の認証が理由不明で失敗する。
             name も password 以外にして、自動入力の対象になりにくくする。
           -->
-          <input name="dbPassword" type="password" id="passwordInput"
+          <!--
+            readonly を付けたまま出すこと。
+            autocomplete="new-password" だけでは、ブラウザによっては
+            このサイトのログインパスワードを入れてしまう。
+            readonly の欄は自動入力の対象にならないため、
+            触られた瞬間に app.js が readonly を外す。
+          -->
+          <input name="dbPassword" type="password" id="passwordInput" readonly
                  autocomplete="new-password" autocorrect="off" autocapitalize="off"
                  spellcheck="false" placeholder="暗号化して保存されます">
           <small class="hint" id="passwordHint" hidden>空欄なら既存のパスワードを保持します</small>

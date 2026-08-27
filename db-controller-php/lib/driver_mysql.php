@@ -44,8 +44,35 @@ class MysqlDriver extends DbDriver
         try {
             $this->pdo = new PDO($dsn, (string)$conn['username'], (string)$conn['password'], $options);
         } catch (PDOException $e) {
-            throw bad($this->explain($e, (string)$conn['username'], $db), 502);
+            throw bad($this->explain($e, (string)$conn['username'], $db,
+                                     (string)$conn['password']), 502);
         }
+    }
+
+    /**
+     * 受け取ったパスワードの「形」だけを伝える。
+     *
+     * 中身は出さない。長さと、前後の空白の有無だけ。
+     * 貼り付けたつもりの値と食い違っていないか（ブラウザの自動入力が
+     * 別の値を入れていないか、改行が混ざっていないか）を、
+     * 利用者自身が確かめられるようにするため。
+     */
+    private function passwordShape(string $password): string
+    {
+        if ($password === '') {
+            return "\n\n※ パスワードが送られていません（空でした）。";
+        }
+
+        $len = strlen($password);
+        $out = "\n\n［送信されたパスワードの形］"
+             . "\n・長さ: {$len} 文字"
+             . "\n　管理画面の値と長さが違うなら、別の値が入っています。";
+
+        if (trim($password) !== $password) {
+            $out .= "\n・<<前後に空白か改行が混ざっています>>"
+                  . "\n　貼り付けのときに紛れ込んだ可能性があります。入れ直してください。";
+        }
+        return $out;
     }
 
     /**
@@ -53,7 +80,8 @@ class MysqlDriver extends DbDriver
      * MySQL の生のメッセージ（SQLSTATE[HY000] [1045] ...）は
      * 原因が読み取りにくいため。
      */
-    private function explain(PDOException $e, string $user, string $db): string
+    private function explain(PDOException $e, string $user, string $db,
+                             string $password = ''): string
     {
         $m = $e->getMessage();
         // 説明を付けても、元のメッセージは必ず最後に残す。
@@ -79,6 +107,7 @@ class MysqlDriver extends DbDriver
                  . "\n　SSL 必須の設定になっていない限り、共用サーバでは通常オフです。"
                  . "\n・phpMyAdmin に同じユーザー名とパスワードで入れるか"
                  . "\n　入れないなら認証情報そのものが違います。入れるならこちらの設定の問題です。"
+                 . $this->passwordShape($password)
                  . $raw;
         }
 
