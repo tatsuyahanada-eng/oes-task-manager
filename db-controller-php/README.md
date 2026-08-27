@@ -196,8 +196,14 @@ https://例.com/dbc-x8f3k9/check.php
 | **.htaccess** | `.htaccess` の名前を `.htaccess-off` に変える | 直れば原因。同梱の `.htaccess-minimal` を `.htaccess` にする |
 | **ファイル不足** | `check.php` を開く | 不足しているファイルを再アップロード |
 
-> `.htaccess` の名前を変えても画面は出ます。
-> ログインの確認は `index.php` 側でも働くためです。
+> **`.htaccess` を外したままでも使えます。**
+> その場合は URL に `index.php` を挟んでください。
+>
+> ```
+> https://例.com/dbc-x8f3k9/index.php/
+> ```
+>
+> `mod_rewrite` が使えないサーバでも、この形なら動きます。
 
 ---
 

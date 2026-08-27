@@ -47,6 +47,16 @@ if ($base !== '' && str_starts_with($path, $base)) {
 }
 $path = '/' . ltrim($path, '/');
 
+// mod_rewrite が使えないサーバでは、
+//   https://例.com/dbc/index.php/api/health
+// のように index.php を挟んだ URL でも動くようにする。
+// 画面側は「いまいる場所からの相対」で API を呼ぶので、
+// ここで /index.php を取り除けば、両方の形が同じ経路に乗る。
+if (str_starts_with($path, '/index.php')) {
+    $path = substr($path, strlen('/index.php'));
+    $path = '/' . ltrim($path, '/');
+}
+
 /* ------------------------------------------------------------
  * 静的ファイル
  * ---------------------------------------------------------- */
