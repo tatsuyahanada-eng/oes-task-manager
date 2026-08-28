@@ -270,6 +270,9 @@ async function toggleServer(id) {
     ]);
     setStatus(`${s.name}`, true);
     setPrompt(`${s.name}`);
+    const v = (info && info.info && info.info.version) ? String(info.info.version) : '';
+    echoGui(`${s.name} に接続${v ? `（${v.split(/[\r\n]/)[0].slice(0, 40)}）` : ''}`,
+            null, `\\use ${s.name}`);
 
     if (supportsDatabaseSwitch && databases.length) {
       setChildren(key, databases.map((d) => {
@@ -356,6 +359,7 @@ async function toggleSchema(serverId, database, schema, forceOpen = false) {
   try {
     const { tables } = await api(dbPath(serverId, 'tables', { database, schema }));
     state.open[nodeKey('tables', serverId, database, schema)] = tables;
+    echoGui(`${schema} のテーブル一覧を取得（${tables.length} 件）`, null, '\\tables');
     renderTableNodes(serverId, database, schema, tables);
   } catch (err) {
     setChildren(key, `<p class="tree-loading">${esc(err.message)}</p>`);
@@ -477,10 +481,21 @@ async function loadDefinition() {
   const { serverId, database, schema, table } = state.sel;
   try {
     state.detail = await api(dbPath(serverId, `tables/${schema}/${table.name}`, { database }));
+    echoGui(`${schema}.${table.name} の列定義を取得`, null, `\\d ${table.name}`);
   } catch {
     state.detail = null;
   }
   updateBadges();
+}
+
+/** いまの参照条件を、日本語の一言にする。 */
+function describeSelect() {
+  const { schema, table } = state.sel;
+  const parts = [`${schema}.${table.name} を表示`];
+  if (state.where) parts.push(`絞り込み: ${state.where}`);
+  if (state.orderBy) parts.push(`並び替え: ${state.orderBy} ${state.orderDir}`);
+  if (state.offset) parts.push(`${num(state.offset + 1)} 行目から`);
+  return parts.join(' / ');
 }
 
 async function loadRows() {
@@ -494,6 +509,9 @@ async function loadRows() {
     }));
     state.rows = r.rows;
     state.rowColumns = r.columns;
+
+    // 画面の操作を CUI にも残す。サーバが実際に流した SQL をそのまま出す。
+    echoGui(describeSelect(), r.sql, `\\count ${table.name}`);
     $('#gridWrap').innerHTML = r.rows.length ? buildGrid(r.columns, r.rows) : '<p class="empty">該当する行がありません</p>';
     const from = r.rows.length ? state.offset + 1 : 0;
     $('#pagerInfo').textContent = `${num(from)}–${num(state.offset + r.rows.length)}`;
@@ -722,6 +740,7 @@ $('#btnSubmitRow').addEventListener('click', () => {
       sql: `INSERT INTO ${schema}.${table}\n  (${cols.join(', ')})\nVALUES\n  (${cols.map(() => '?').join(', ')});\n\n-- 値はすべてバインド変数として渡されます`,
       run: () => api(tablePath('/rows'), { method: 'POST', body: { database, fields: changed } }),
       done: '1 行を追加しました',
+      cuiHint: `INSERT INTO ${qt(schema, table)} (${cols.map(qi).join(', ')}) VALUES (...);`,
     });
   } else {
     const orig = state.editing.original;
@@ -736,6 +755,8 @@ $('#btnSubmitRow').addEventListener('click', () => {
       sql: `UPDATE ${schema}.${table}\nSET\n${cols.map((c) => `  ${c} = ?`).join(',\n')}\nWHERE ${state.detail.primaryKey.map((c) => `${c} = ?`).join(' AND ')};\n\n-- 影響行数が 1 行でなければ自動でロールバックします`,
       run: () => api(tablePath('/rows'), { method: 'PATCH', body: { database, key: keyFields(), fields: changed } }),
       done: '1 行を修正しました',
+      cuiHint: `UPDATE ${qt(schema, table)} SET ${cols.map((c) => `${qi(c)} = ...`).join(', ')}`
+             + ` WHERE ${state.detail.primaryKey.map((c) => `${qi(c)} = ...`).join(' AND ')};`,
     });
   }
 });
@@ -757,14 +778,18 @@ function confirmDelete(index) {
     sql: `DELETE FROM ${schema}.${table}\nWHERE ${state.detail.primaryKey.map((c) => `${c} = ?`).join(' AND ')};\n\n-- 影響行数が 1 行でなければ自動でロールバックします`,
     run: () => api(tablePath('/rows'), { method: 'DELETE', body: { database, key: keyFields() } }),
     done: '1 行を削除しました',
+    cuiHint: `DELETE FROM ${qt(schema, table)}`
+           + ` WHERE ${state.detail.primaryKey.map((c) => `${qi(c)} = ...`).join(' AND ')};`,
   });
 }
 
 /* ---------- 実行確認 ---------- */
 
-function openConfirm({ title, danger, body, sql, run, done, after, requireAllRows = false }) {
+function openConfirm({ title, danger, body, sql, run, done, after, cuiHint,
+                      requireAllRows = false }) {
   // after を渡すと、成功後の後始末をそれに差し替える (既定は行の読み直し)
-  state.pending = { run, done, after };
+  // cuiHint は、同じ操作を CUI で書くときの形
+  state.pending = { run, done, after, cuiHint };
   $('#confirmTitle').textContent = title;
   $('#confirmBody').innerHTML = body;
   $('#confirmSql').textContent = sql;
@@ -792,6 +817,15 @@ $('#btnRunConfirm').addEventListener('click', async () => {
     const r = await state.pending.run();
     const n = r && (r.affected !== undefined ? r.affected : r.inserted);
     const msg = state.pending.done + (n !== undefined ? `（${num(n)} 行）` : '');
+
+    // 更新系はサーバが実行した SQL を返すので、それを CUI に残す
+    if (r && r.sql) {
+      echoGui(
+        `${state.pending.done}${n !== undefined ? `（${num(n)} 行）` : ''}`,
+        r.sql,
+        state.pending.cuiHint
+      );
+    }
     // 操作が完了したので、開いているシートはすべて閉じる
     $$('.sheet-backdrop').forEach((b) => { b.hidden = true; });
     const after = state.pending.after;
@@ -829,6 +863,48 @@ const CUI_HELP = `使えるコマンド:
   SELECT / WITH は参照。INSERT / UPDATE / DELETE は
   「書込可」のサーバでのみ、確認のうえ実行します。
   ↑ ↓ で履歴をたどれます。`;
+
+/* ============================================================
+ * GUI 操作を CUI へ書き出す
+ *
+ * 画面のボタンで行った操作を、CUI 欄に「実際に流れた SQL」として
+ * 残す。CUI に慣れるための写経帳のようなもの。
+ *
+ * 出すのは 3 行:
+ *   -- [GUI] 何をしたか
+ *   実際の SQL
+ *      CUI: 同じことを CUI で書くとどうなるか（あれば）
+ * ========================================================== */
+
+/** 直前に出した SQL。同じものが連続したときに黙らせるため。 */
+let lastEchoed = '';
+
+function echoGui(label, sql, hint) {
+  // 同じ SQL が続けて流れるときは、記録を汚さないよう省く
+  const key = label + '\u0000' + (sql || '');
+  if (key === lastEchoed) return;
+  lastEchoed = key;
+
+  cout(`-- [GUI] ${label}`, 'c-gui');
+  if (sql) {
+    // 長い SQL は読みやすいよう、行ごとに分けて出す
+    String(sql).split('\n').forEach((line) => cout(line, 'c-sql'));
+  }
+  if (hint) cout(`   CUI: ${hint}`, 'c-hint');
+}
+
+/** 識別子を SQL に書くときの形。CUI の写経用なので、DB 種別に寄せる。 */
+function qi(name) {
+  const server = serverById(state.sel.serverId);
+  const type = server ? server.type : 'mysql';
+  if (type === 'mysql') return '`' + String(name).replace(/`/g, '``') + '`';
+  return '"' + String(name).replace(/"/g, '""') + '"';
+}
+
+/** schema.table の完全な形。 */
+function qt(schema, table) {
+  return `${qi(schema)}.${qi(table)}`;
+}
 
 function cout(text, cls = 'c-out') {
   const el = document.createElement('div');
@@ -1497,6 +1573,9 @@ $('#btnExportTable').addEventListener('click', () => {
   const where = $('#csvUseWhere').checked ? state.where : '';
   const qs = csvQuery({ where });
   download(`/api/db/${serverId}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table.name)}/export.csv?${qs}`);
+  echoGui(`${schema}.${table.name} を CSV に書き出し${where ? `（絞り込み: ${where}）` : ''}`,
+          `SELECT * FROM ${qt(schema, table.name)}${where ? `\nWHERE ${where}` : ''};`,
+          `\\export ${table.name}`);
   toast('CSV を書き出しています…', 'ok');
 });
 
@@ -1636,6 +1715,8 @@ $('#btnCsvImport').addEventListener('click', () => {
       return r;
     },
     done: 'CSV を取り込みました',
+    cuiHint: `INSERT INTO ${p.schema}.${p.table} (${p.matchedColumns.join(', ')}) VALUES (...);`
+           + ` × ${p.totalRows} 行`,
   });
 });
 
@@ -1784,7 +1865,15 @@ $('#userList')?.addEventListener('click', async (ev) => {
  * ここで当てるのは「画面から変えた分」だけで、CSS より優先される。
  * ========================================================== */
 
-const THEME_TARGETS = ['#app', '#tabbar'];
+/**
+ * 配色を当てる先。
+ *
+ * theme.css は区画ごと（.pane-tree / .pane-data / .pane-cui）に
+ * トークンを定義しているので、その外側の #app に変数を入れても
+ * 内側の定義に負けて効かない。区画そのものへ入れる。
+ * （style 属性は詳細度に関係なく勝つ）
+ */
+const THEME_TARGETS = ['.pane-tree', '.pane-data'];
 
 /** 変更分を実際の画面へ当てる。 */
 function applyTheme(applied) {
