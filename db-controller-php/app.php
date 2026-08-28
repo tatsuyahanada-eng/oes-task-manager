@@ -550,33 +550,36 @@ function route_db(string $method, array $seg): void
         }
 
         if ($tail === 'count' && $method === 'GET') {
-            $where = (string)($_GET['where'] ?? '');
+            $where = $drv->combineWhere((string)($_GET['where'] ?? ''), request_filters());
             json_out(['schema' => $schema, 'table' => $table,
-                      'count' => $drv->countRows($schema, $table, $where)]);
+                      'count' => $drv->countRows($schema, $table, $where, true)]);
         }
 
         // CSV 書き出し
         if ($tail === 'export.csv' && $method === 'GET') {
             $enc = (string)($_GET['encoding'] ?? 'utf-8');
             $dl  = ($_GET['delimiter'] ?? '') === 'tab' ? "\t" : (string)($_GET['delimiter'] ?? ',');
+            $where = $drv->combineWhere((string)($_GET['where'] ?? ''), request_filters());
             audit([
                 'action' => 'export', 'user' => $user['username'],
                 'connection' => $conn['name'], 'type' => $conn['type'],
                 'database' => $database, 'target' => "{$schema}.{$table}",
                 'sql' => "CSV 書き出し (文字コード: {$enc})",
             ]);
-            csv_export($drv, $schema, $table, (string)($_GET['where'] ?? ''), $enc, $dl);
+            csv_export($drv, $schema, $table, $where, $enc, $dl, true);
         }
 
         if ($tail === 'rows' && $method === 'GET') {
+            $where = $drv->combineWhere((string)($_GET['where'] ?? ''), request_filters());
             json_out(array_merge(
                 ['schema' => $schema, 'table' => $table, 'database' => $database],
                 $drv->selectRows($schema, $table,
-                    (string)($_GET['where'] ?? ''),
+                    $where,
                     (string)($_GET['orderBy'] ?? ''),
                     (string)($_GET['orderDir'] ?? 'ASC'),
                     (int)($_GET['limit'] ?? 50),
-                    (int)($_GET['offset'] ?? 0))
+                    (int)($_GET['offset'] ?? 0),
+                    true)
             ));
         }
 

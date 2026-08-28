@@ -255,6 +255,34 @@ body {
 .pill.source { color: var(--warn); border-color: #56471c; }
 .pill.target { color: var(--ok); border-color: #24503f; }
 
+/* ---------- 検索パネル ---------- */
+.filter-panel {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.filter-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.filter-head h3 { margin: 0; font-size: 12px; font-weight: 600; color: var(--text-mute); }
+.filter-empty { margin: 2px 0; font-size: 12px; color: var(--text-dim); }
+.filter-rows { display: flex; flex-direction: column; gap: 6px; }
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-soft, rgba(255,255,255,0.02));
+}
+.filter-row select, .filter-row input { min-width: 0; }
+.filter-row .filter-col { flex: 1 1 160px; }
+.filter-row .filter-op { flex: 1 1 120px; }
+.filter-row .filter-values { display: flex; align-items: center; gap: 6px; flex: 2 1 200px; }
+.filter-row .filter-values input { flex: 1 1 0; min-width: 90px; }
+.filter-row .filter-values .filter-sep { font-size: 11px; color: var(--text-dim); }
+.filter-remove { flex: 0 0 auto; }
+
 /* ---------- データ ---------- */
 .data-controls {
   flex: 0 0 auto;

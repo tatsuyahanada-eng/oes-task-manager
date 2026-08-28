@@ -34,6 +34,8 @@ const state = {
   orderBy: '',
   orderDir: 'ASC',
   where: '',
+  /** 検索パネルの条件 [{column, op, value, value2}] */
+  filters: [],
   editing: null,
   pending: null,
   history: [],
@@ -493,12 +495,14 @@ async function openTable(serverId, database, schema, table, type) {
   state.orderBy = '';
   state.orderDir = 'ASC';
   state.where = '';
+  state.filters = [];
   $('#whereInput').value = '';
   $('#dataTitle').textContent = `${schema}.${table}`;
 
   highlightSelectedTable();
   setView('data');
   await loadDefinition();
+  renderFilterPanel();
   await loadRows();
 }
 
@@ -524,11 +528,176 @@ async function loadDefinition() {
   updateBadges();
 }
 
+/* ============================================================
+ * 検索パネル（日付・ユーザー・項目などで絞り込む）
+ * ========================================================== */
+
+/** 列の型を、検索欄をどう出すかの区分にする。 */
+function columnKind(dataType) {
+  const t = String(dataType || '').toLowerCase();
+  if (/bool/.test(t)) return 'bool';
+  if (/date|time/.test(t)) return 'date';
+  if (/int|numeric|decimal|float|double|real|serial|money/.test(t)) return 'number';
+  return 'text';
+}
+
+const FILTER_OPS = {
+  date:   [['between', '期間で指定'], ['eq', 'この日'], ['gte', '以降'], ['lte', '以前'],
+           ['is_null', '未設定'], ['is_not_null', '設定あり']],
+  number: [['eq', '等しい'], ['ne', '等しくない'], ['gte', '以上'], ['lte', '以下'],
+           ['between', '範囲で指定'], ['is_null', '未設定'], ['is_not_null', '設定あり']],
+  bool:   [['eq', '等しい'], ['is_null', '未設定'], ['is_not_null', '設定あり']],
+  text:   [['contains', '含む'], ['eq', '等しい'], ['starts_with', 'で始まる'], ['ends_with', 'で終わる'],
+           ['in', 'いずれかに一致（改行/カンマ区切り）'], ['is_null', '未設定'], ['is_not_null', '設定あり']],
+};
+
+const FILTER_INPUT_TYPE = { date: 'date', number: 'number', bool: 'text', text: 'text' };
+
+let filterRowSeq = 0;
+
+function renderFilterPanel() {
+  filterRowSeq = 0;
+  $('#filterRows').innerHTML =
+    '<p class="empty filter-empty" id="filterEmpty">「+ 条件を追加」で、日付・ユーザー・項目などを選んで絞り込めます。</p>';
+  $('#filterPanel').hidden = !state.detail;
+}
+
+function updateFilterEmptyState() {
+  const has = $('#filterRows').querySelector('.filter-row');
+  const empty = $('#filterEmpty');
+  if (empty) empty.hidden = Boolean(has);
+}
+
+function addFilterRow() {
+  if (!state.detail || !state.detail.columns.length) return;
+  const idx = filterRowSeq++;
+  const col = state.detail.columns[0];
+  const row = document.createElement('div');
+  row.className = 'filter-row';
+  row.dataset.idx = String(idx);
+  row.innerHTML = filterRowHtml(col.name);
+  $('#filterRows').appendChild(row);
+  fillFilterOps(row, col.name);
+  updateFilterEmptyState();
+}
+
+function filterRowHtml(colName) {
+  const cols = state.detail.columns.map((c) =>
+    `<option value="${esc(c.name)}"${c.name === colName ? ' selected' : ''}>${esc(c.name)}（${esc(c.dataType)}）</option>`
+  ).join('');
+  return `
+    <select class="filter-col">${cols}</select>
+    <select class="filter-op"></select>
+    <span class="filter-values">
+      <input class="filter-val" type="text">
+      <span class="filter-sep" hidden>〜</span>
+      <input class="filter-val2" type="text" hidden>
+    </span>
+    <button type="button" class="btn btn-sm btn-danger filter-remove" title="この条件を削除">×</button>`;
+}
+
+/**
+ * 選んだ列の型に合わせて、演算子と値欄を作り直す。
+ * 列の型（区分）が変わったときは、演算子は区分ごとの既定（先頭）に戻す。
+ * 前の演算子をそのまま残すと、たとえば数値の「等しい」が日付でも
+ * たまたま同じ値名で存在するために、日付では不向きな演算子が残ってしまう。
+ */
+function fillFilterOps(row, colName) {
+  const col = state.detail.columns.find((c) => c.name === colName);
+  const kind = columnKind(col ? col.dataType : '');
+  const prevKind = row.dataset.kind || '';
+  const opSel = row.querySelector('.filter-op');
+  const prevOp = opSel.value;
+  opSel.innerHTML = FILTER_OPS[kind].map(([v, label]) => `<option value="${v}">${label}</option>`).join('');
+  if (prevKind === kind && FILTER_OPS[kind].some(([v]) => v === prevOp)) opSel.value = prevOp;
+  row.dataset.kind = kind;
+  updateFilterValueInputs(row, kind);
+}
+
+function updateFilterValueInputs(row, kind) {
+  const op = row.querySelector('.filter-op').value;
+  const inputType = FILTER_INPUT_TYPE[kind] || 'text';
+  const v1 = row.querySelector('.filter-val');
+  const v2 = row.querySelector('.filter-val2');
+  const sep = row.querySelector('.filter-sep');
+
+  const noValue = op === 'is_null' || op === 'is_not_null';
+  const isBetween = op === 'between';
+
+  v1.hidden = noValue;
+  v2.hidden = !isBetween;
+  sep.hidden = !isBetween;
+  v1.type = kind === 'bool' ? 'text' : inputType;
+  v2.type = v1.type;
+  if (kind === 'bool' && !noValue) {
+    v1.placeholder = 'true / false など';
+  } else if (op === 'in') {
+    v1.placeholder = '値1, 値2 …';
+  } else {
+    v1.placeholder = '';
+  }
+}
+
+$('#btnAddFilter').addEventListener('click', addFilterRow);
+
+$('#filterRows').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.filter-remove');
+  if (!btn) return;
+  btn.closest('.filter-row').remove();
+  updateFilterEmptyState();
+});
+
+$('#filterRows').addEventListener('change', (ev) => {
+  const row = ev.target.closest('.filter-row');
+  if (!row) return;
+  if (ev.target.classList.contains('filter-col')) {
+    fillFilterOps(row, ev.target.value);
+  } else if (ev.target.classList.contains('filter-op')) {
+    const col = state.detail.columns.find((c) => c.name === row.querySelector('.filter-col').value);
+    updateFilterValueInputs(row, columnKind(col ? col.dataType : ''));
+  }
+});
+
+/** 画面の検索条件を、サーバへ送る形にする。値が要る条件で空欄なら無視する。 */
+function collectFilters() {
+  if (!$('#filterPanel') || $('#filterPanel').hidden) return [];
+  return $$('#filterRows .filter-row').map((row) => {
+    const column = row.querySelector('.filter-col').value;
+    const op = row.querySelector('.filter-op').value;
+    const value = row.querySelector('.filter-val').value.trim();
+    const value2 = row.querySelector('.filter-val2').value.trim();
+    return { column, op, value, value2 };
+  }).filter((f) => {
+    if (f.op === 'is_null' || f.op === 'is_not_null') return true;
+    if (f.op === 'between') return f.value !== '' || f.value2 !== '';
+    return f.value !== '';
+  });
+}
+
+function filtersParam() {
+  const f = state.filters;
+  return f && f.length ? JSON.stringify(f) : '';
+}
+
+/** 検索条件を、日本語の一言にする。CUI に流す説明で使う。 */
+function describeFilters() {
+  const opLabel = { eq: '=', ne: '≠', gt: '>', gte: '≥', lt: '<', lte: '≤',
+    contains: 'を含む', starts_with: 'で始まる', ends_with: 'で終わる',
+    is_null: '未設定', is_not_null: '設定あり', in: 'のいずれか' };
+  return state.filters.map((f) => {
+    if (f.op === 'is_null' || f.op === 'is_not_null') return `${f.column} ${opLabel[f.op]}`;
+    if (f.op === 'between') return `${f.column} ${f.value || '…'}〜${f.value2 || '…'}`;
+    return `${f.column} ${opLabel[f.op] || f.op} 「${f.value}」`;
+  });
+}
+
 /** いまの参照条件を、日本語の一言にする。 */
 function describeSelect() {
   const { schema, table } = state.sel;
   const parts = [`${schema}.${table.name} を表示`];
-  if (state.where) parts.push(`絞り込み: ${state.where}`);
+  const fdesc = describeFilters();
+  if (fdesc.length) parts.push(`検索: ${fdesc.join(' かつ ')}`);
+  if (state.where) parts.push(`SQL条件: ${state.where}`);
   if (state.orderBy) parts.push(`並び替え: ${state.orderBy} ${state.orderDir}`);
   if (state.offset) parts.push(`${num(state.offset + 1)} 行目から`);
   return parts.join(' / ');
@@ -542,6 +711,7 @@ async function loadRows() {
     const r = await api(dbPath(serverId, `tables/${schema}/${table.name}/rows`, {
       database, limit: state.limit, offset: state.offset,
       orderBy: state.orderBy, orderDir: state.orderDir, where: state.where,
+      filters: filtersParam(),
     }));
     state.rows = r.rows;
     state.rowColumns = r.columns;
@@ -612,6 +782,7 @@ $('#gridWrap').addEventListener('click', (ev) => {
 
 $('#btnReload').addEventListener('click', () => {
   state.where = $('#whereInput').value.trim();
+  state.filters = collectFilters();
   state.limit = Number($('#limitSelect').value);
   state.offset = 0;
   loadRows();
@@ -1558,8 +1729,13 @@ $('#btnCsv').addEventListener('click', async () => {
   const hasTable = Boolean(table);
   $('#btnExportTable').disabled = !hasTable;
   $('#btnCsvPreview').disabled = !hasTable;
-  $('#csvUseWhere').checked = Boolean(state.where);
-  $('#csvWhereText').textContent = state.where ? `WHERE ${state.where}` : '（絞り込みなし＝全行）';
+  const hasFilter = Boolean(state.where) || state.filters.length > 0;
+  $('#csvUseWhere').checked = hasFilter;
+  const fdesc = describeFilters();
+  const bits = [];
+  if (fdesc.length) bits.push(`検索: ${fdesc.join(' かつ ')}`);
+  if (state.where) bits.push(`SQL条件: ${state.where}`);
+  $('#csvWhereText').textContent = bits.length ? bits.join(' / ') : '（絞り込みなし＝全行）';
   $('#csvImportReadonly').hidden = canWrite(state.sel.serverId);
   $('#csvPreview').innerHTML = '';
   $('#csvImportMessage').textContent = '';
@@ -1606,10 +1782,15 @@ function download(path) {
 $('#btnExportTable').addEventListener('click', () => {
   const { serverId, schema, table } = state.sel;
   if (!table) return;
-  const where = $('#csvUseWhere').checked ? state.where : '';
-  const qs = csvQuery({ where });
+  const useFilter = $('#csvUseWhere').checked;
+  const where = useFilter ? state.where : '';
+  const filters = useFilter ? filtersParam() : '';
+  const qs = csvQuery({ where, filters });
   download(`/api/db/${serverId}/tables/${encodeURIComponent(schema)}/${encodeURIComponent(table.name)}/export.csv?${qs}`);
-  echoGui(`${schema}.${table.name} を CSV に書き出し${where ? `（絞り込み: ${where}）` : ''}`,
+  const fdesc = useFilter ? describeFilters() : [];
+  const label = [fdesc.length ? `検索: ${fdesc.join(' かつ ')}` : '', where ? `SQL条件: ${where}` : '']
+    .filter(Boolean).join(' / ');
+  echoGui(`${schema}.${table.name} を CSV に書き出し${label ? `（${label}）` : ''}`,
           `SELECT * FROM ${qt(schema, table.name)}${where ? `\nWHERE ${where}` : ''};`,
           `\\export ${table.name}`);
   toast('CSV を書き出しています…', 'ok');

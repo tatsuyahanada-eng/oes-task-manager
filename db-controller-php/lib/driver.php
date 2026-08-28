@@ -234,21 +234,94 @@ abstract class DbDriver
         return $this->quote($schema) . '.' . $this->quote($table);
     }
 
-    public function countRows(string $schema, string $table, string $where = ''): int
+    public function countRows(string $schema, string $table, string $where = '', bool $whereValidated = false): int
     {
         $sql = 'SELECT COUNT(*) AS n FROM ' . $this->qualify($schema, $table);
-        if ($where !== '') $sql .= ' WHERE ' . $this->assertWhere($where);
+        if ($where !== '') $sql .= ' WHERE ' . ($whereValidated ? $where : $this->assertWhere($where));
         return (int)($this->one($sql)['n'] ?? 0);
     }
 
+    /** 検索パネルで選べる演算子。ここに無いものは弾く。 */
+    private const FILTER_OPS = [
+        'eq', 'ne', 'gt', 'gte', 'lt', 'lte',
+        'contains', 'starts_with', 'ends_with',
+        'between', 'in', 'is_null', 'is_not_null',
+    ];
+
+    /**
+     * 検索パネルの条件（列・演算子・値の組）を WHERE 句の断片にする。
+     * 値は必ず PDO::quote() を通し、列名は assertIdentifier() で検査してから
+     * quote() で囲む。文字列を直接つなげないことで、検索欄からの注入を防ぐ。
+     */
+    public function filtersToWhere(array $filters): string
+    {
+        $parts = [];
+        foreach ($filters as $f) {
+            if (!is_array($f)) continue;
+            $col = $this->assertIdentifier((string)($f['column'] ?? ''), '検索項目');
+            $op  = (string)($f['op'] ?? 'eq');
+            if (!in_array($op, self::FILTER_OPS, true)) throw bad('不正な検索条件です。');
+            $qcol = $this->quote($col);
+
+            if ($op === 'is_null')     { $parts[] = "{$qcol} IS NULL"; continue; }
+            if ($op === 'is_not_null') { $parts[] = "{$qcol} IS NOT NULL"; continue; }
+
+            if ($op === 'between') {
+                $v1 = trim((string)($f['value'] ?? ''));
+                $v2 = trim((string)($f['value2'] ?? ''));
+                if ($v1 === '' && $v2 === '') continue;
+                if ($v1 !== '' && $v2 !== '') {
+                    $parts[] = "{$qcol} BETWEEN " . $this->pdo->quote($v1) . ' AND ' . $this->pdo->quote($v2);
+                } elseif ($v1 !== '') {
+                    $parts[] = "{$qcol} >= " . $this->pdo->quote($v1);
+                } else {
+                    $parts[] = "{$qcol} <= " . $this->pdo->quote($v2);
+                }
+                continue;
+            }
+
+            if ($op === 'in') {
+                $items = preg_split('/[,\n]/', (string)($f['value'] ?? ''));
+                $items = array_values(array_filter(array_map('trim', $items), fn($v) => $v !== ''));
+                if (!$items) continue;
+                $parts[] = "{$qcol} IN (" . implode(', ', array_map(fn($v) => $this->pdo->quote($v), $items)) . ')';
+                continue;
+            }
+
+            $val = trim((string)($f['value'] ?? ''));
+            if ($val === '') continue;
+
+            if (in_array($op, ['contains', 'starts_with', 'ends_with'], true)) {
+                $esc = str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $val);
+                $pattern = $op === 'contains' ? "%{$esc}%" : ($op === 'starts_with' ? "{$esc}%" : "%{$esc}");
+                $parts[] = "{$qcol} LIKE " . $this->pdo->quote($pattern) . " ESCAPE '\\\\'";
+                continue;
+            }
+
+            $map = ['eq' => '=', 'ne' => '<>', 'gt' => '>', 'gte' => '>=', 'lt' => '<', 'lte' => '<='];
+            $parts[] = "{$qcol} {$map[$op]} " . $this->pdo->quote($val);
+        }
+        return implode(' AND ', $parts);
+    }
+
+    /** 検索パネルの条件と、自由入力の WHERE を一つにまとめる。 */
+    public function combineWhere(string $rawWhere, array $filters): string
+    {
+        $a = $this->assertWhere($rawWhere);
+        $b = $this->filtersToWhere($filters);
+        if ($a !== '' && $b !== '') return "({$a}) AND ({$b})";
+        return $a !== '' ? $a : $b;
+    }
+
     public function selectRows(string $schema, string $table, string $where,
-                               string $orderBy, string $orderDir, int $limit, int $offset): array
+                               string $orderBy, string $orderDir, int $limit, int $offset,
+                               bool $whereValidated = false): array
     {
         $limit = max(1, min($limit, 1000));
         $offset = max(0, $offset);
 
         $sql = 'SELECT * FROM ' . $this->qualify($schema, $table);
-        if ($where !== '') $sql .= ' WHERE ' . $this->assertWhere($where);
+        if ($where !== '') $sql .= ' WHERE ' . ($whereValidated ? $where : $this->assertWhere($where));
         if ($orderBy !== '') {
             $dir = strtoupper($orderDir) === 'DESC' ? 'DESC' : 'ASC';
             $sql .= ' ORDER BY ' . $this->quote($this->assertIdentifier($orderBy, '並び替えの列')) . ' ' . $dir;

@@ -102,6 +102,18 @@ function pick(array $a, string $key, $default = null)
     return array_key_exists($key, $a) ? $a[$key] : $default;
 }
 
+/**
+ * 検索パネルの条件（JSON 文字列）を配列にする。
+ * 壊れた JSON や配列でない値は「条件なし」として扱う。
+ */
+function request_filters(): array
+{
+    $raw = (string)($_GET['filters'] ?? '');
+    if ($raw === '') return [];
+    $v = json_decode($raw, true);
+    return is_array($v) ? $v : [];
+}
+
 /** data/ ディレクトリの絶対パス。 */
 function data_path(string $name = ''): string
 {

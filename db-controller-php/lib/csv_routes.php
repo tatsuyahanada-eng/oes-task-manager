@@ -17,7 +17,8 @@ const DBC_IMPORT_MAX_ROWS = 50000;
 
 /** 書き出し。件数が多くても詰まらないよう、少しずつ流す。 */
 function csv_export(DbDriver $drv, string $schema, string $table,
-                    string $where, string $encoding, string $delimiter): void
+                    string $where, string $encoding, string $delimiter,
+                    bool $whereValidated = false): void
 {
     $detail = $drv->describeTable($schema, $table);
     $columns = array_map(fn($c) => $c['name'], $detail['columns']);
@@ -34,7 +35,7 @@ function csv_export(DbDriver $drv, string $schema, string $table,
     echo csv_encode(csv_line($columns, $delimiter), $encoding);
 
     $sql = 'SELECT * FROM ' . $drv->qualify($schema, $table);
-    if ($where !== '') $sql .= ' WHERE ' . $drv->assertWhere($where);
+    if ($where !== '') $sql .= ' WHERE ' . ($whereValidated ? $where : $drv->assertWhere($where));
 
     $st = $drv->pdo()->query($sql);
     $buffer = '';

@@ -85,15 +85,27 @@
       </div>
     </div>
 
+    <div class="filter-panel" id="filterPanel" hidden>
+      <div class="filter-head">
+        <h3>検索条件</h3>
+        <button type="button" class="btn btn-sm" id="btnAddFilter">+ 条件を追加</button>
+      </div>
+      <div class="filter-rows" id="filterRows">
+        <p class="empty filter-empty" id="filterEmpty">
+          「+ 条件を追加」で、日付・ユーザー・項目などを選んで絞り込めます。
+        </p>
+      </div>
+    </div>
+
     <div class="data-controls">
-      <input type="text" id="whereInput" placeholder="WHERE 条件（例: status = 'A'）">
+      <input type="text" id="whereInput" placeholder="SQL条件（上級・任意。例: status = 'A'）">
       <select id="limitSelect">
         <option value="25">25件</option>
         <option value="50" selected>50件</option>
         <option value="100">100件</option>
         <option value="200">200件</option>
       </select>
-      <button class="btn btn-sm btn-primary" id="btnReload">表示</button>
+      <button class="btn btn-sm btn-primary" id="btnReload">検索</button>
     </div>
 
     <div class="grid-wrap" id="gridWrap">
@@ -443,7 +455,7 @@
     <section class="csv-panel is-active" data-csv-panel="export">
       <label class="check">
         <input type="checkbox" id="csvUseWhere" checked>
-        いまの WHERE 条件で絞り込む
+        いまの検索条件で絞り込む
       </label>
       <p class="muted" id="csvWhereText"></p>
       <div class="notice">
