@@ -64,7 +64,7 @@ if (str_starts_with($path, '/index.php')) {
 
 $PUBLIC_FILES = [
     '/login.html', '/style.css', '/theme.css', '/logo.svg', '/manifest.webmanifest', '/sw.js',
-    '/icons/icon.svg', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png',
+    '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png',
 ];
 
 if (!str_starts_with($path, '/api/')) {
