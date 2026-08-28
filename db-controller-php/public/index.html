@@ -88,13 +88,12 @@
     <div class="filter-panel" id="filterPanel" hidden>
       <div class="filter-head">
         <h3>検索条件</h3>
-        <button type="button" class="btn btn-sm" id="btnAddFilter">+ 条件を追加</button>
+        <div class="filter-head-actions">
+          <button type="button" class="btn btn-sm" id="btnClearFilter">条件をクリア</button>
+          <button type="button" class="btn btn-sm" id="btnAddFilter">+ 条件を追加</button>
+        </div>
       </div>
-      <div class="filter-rows" id="filterRows">
-        <p class="empty filter-empty" id="filterEmpty">
-          「+ 条件を追加」で、日付・ユーザー・項目などを選んで絞り込めます。
-        </p>
-      </div>
+      <div class="filter-rows" id="filterRows"></div>
     </div>
 
     <div class="data-controls">
@@ -107,6 +106,8 @@
       </select>
       <button class="btn btn-sm btn-primary" id="btnReload">検索</button>
     </div>
+
+    <pre class="sql-inline" id="lastSqlBox" hidden></pre>
 
     <div class="grid-wrap" id="gridWrap">
       <p class="empty">左のツリーからテーブルを選んでください</p>

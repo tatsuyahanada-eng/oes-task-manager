@@ -244,6 +244,29 @@ function users_reset_password(string $username, string $new): void
     throw bad('その利用者は見つかりません。', 404);
 }
 
+/**
+ * 初期パスワードでの復旧。
+ *
+ * $username のパスワードを、現在の値に関わらず初期パスワードへ強制的に戻す。
+ * 「今のパスワードを忘れた／分からなくなった」ときに、初期パスワードさえ
+ * 分かっていれば管理者アカウントへ入り直せるようにするための仕組み。
+ * 呼び出し側で「対象は既定の管理者アカウントだけ」であることを確認してから使うこと。
+ */
+function users_recover_default(string $username): void
+{
+    $db = users_load();
+    foreach ($db['users'] as $i => $u) {
+        if (strcasecmp($u['username'], $username) !== 0) continue;
+
+        $db['users'][$i]['hash']              = password_hash(DBC_DEFAULT_PASS, PASSWORD_DEFAULT);
+        $db['users'][$i]['isDefaultPassword']  = true;
+        $db['users'][$i]['updatedAt']          = now_iso();
+        users_save($db);
+        return;
+    }
+    throw bad('その利用者は見つかりません。', 404);
+}
+
 function users_mark_login(string $username): void
 {
     $db = users_load();

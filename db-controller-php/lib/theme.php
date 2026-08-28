@@ -11,50 +11,33 @@
 
 declare(strict_types=1);
 
-/** 画面から変えられる色。ここに無いものは受け付けない。 */
+/**
+ * 画面から変えられる色。ここに無いものは受け付けない。
+ *
+ * 背景・文字色・マウスオーバー色に絞った簡易版。
+ * それ以外（区切り線や状態色など）は theme.css の既定のまま。
+ */
 function theme_tokens(): array
 {
     return [
-        'bg'           => ['label' => '背景',           'group' => '背景'],
-        'bg-panel'     => ['label' => 'パネル',         'group' => '背景'],
-        'bg-raise'     => ['label' => '見出し行',       'group' => '背景'],
-        'bg-hover'     => ['label' => 'マウス乗せ',     'group' => '背景'],
-        'border'       => ['label' => '区切り線',       'group' => '線'],
-        'border-strong'=> ['label' => '強い線',         'group' => '線'],
-        'text'         => ['label' => '本文',           'group' => '文字'],
-        'text-mute'    => ['label' => '補足',           'group' => '文字'],
-        'text-dim'     => ['label' => '控えめ',         'group' => '文字'],
-        'accent'       => ['label' => '選択中',         'group' => '状態'],
-        'accent-dim'   => ['label' => '選択中の背景',   'group' => '状態'],
-        'ok'           => ['label' => '成功',           'group' => '状態'],
-        'warn'         => ['label' => '注意',           'group' => '状態'],
-        'danger'       => ['label' => '削除・危険',     'group' => '状態'],
-        'write'        => ['label' => '書き込み可',     'group' => '状態'],
+        'bg'       => ['label' => '背景',       'group' => '配色'],
+        'bg-hover' => ['label' => 'マウス乗せ', 'group' => '配色'],
+        'text'     => ['label' => '文字色',     'group' => '配色'],
     ];
 }
 
-/** 画面から変えられる文字の大きさ。 */
+/** 画面から変えられる文字の大きさ。簡易版としてフォントサイズだけに絞る。 */
 function theme_sizes(): array
 {
     return [
-        'ws-font-size'   => ['label' => '文字の大きさ',   'min' => 11, 'max' => 20, 'unit' => 'px'],
-        'ws-grid-size'   => ['label' => '表の文字',       'min' => 10, 'max' => 18, 'unit' => 'px'],
-        'ws-line-height' => ['label' => '行の高さ',       'min' => 1.2, 'max' => 2.2, 'unit' => ''],
+        'ws-font-size' => ['label' => 'フォントサイズ', 'min' => 11, 'max' => 20, 'unit' => 'px'],
     ];
 }
 
-/** 画面から変えられる文言。 */
+/** 画面から変えられる文言。簡易版のため、いまは編集項目なし。 */
 function theme_labels(): array
 {
-    return [
-        'appTitle'    => ['label' => 'タイトル',       'default' => 'DB Controller'],
-        'tabTree'     => ['label' => 'タブ: ツリー',   'default' => 'ツリー'],
-        'tabData'     => ['label' => 'タブ: データ',   'default' => 'データ'],
-        'tabCui'      => ['label' => 'タブ: CUI',      'default' => 'CUI'],
-        'tabSettings' => ['label' => 'タブ: 設定',     'default' => '設定'],
-        'readOnly'    => ['label' => '読取専用の表示', 'default' => '読取専用'],
-        'writable'    => ['label' => '書込可の表示',   'default' => '書込可'],
-    ];
+    return [];
 }
 
 function theme_file(): string { return data_path('theme.json'); }

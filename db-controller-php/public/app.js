@@ -555,17 +555,17 @@ const FILTER_INPUT_TYPE = { date: 'date', number: 'number', bool: 'text', text: 
 
 let filterRowSeq = 0;
 
+/** 検索パネルを作り直す。ボタンを押さなくても条件を組めるよう、最初から1行出しておく。 */
 function renderFilterPanel() {
   filterRowSeq = 0;
-  $('#filterRows').innerHTML =
-    '<p class="empty filter-empty" id="filterEmpty">「+ 条件を追加」で、日付・ユーザー・項目などを選んで絞り込めます。</p>';
+  $('#filterRows').innerHTML = '';
   $('#filterPanel').hidden = !state.detail;
+  if (state.detail) addFilterRow();
 }
 
-function updateFilterEmptyState() {
-  const has = $('#filterRows').querySelector('.filter-row');
-  const empty = $('#filterEmpty');
-  if (empty) empty.hidden = Boolean(has);
+/** 条件行が1つも無くならないようにする。無くなったら空の1行を出し直す。 */
+function ensureFilterRow() {
+  if (!$('#filterRows').querySelector('.filter-row')) addFilterRow();
 }
 
 function addFilterRow() {
@@ -578,7 +578,6 @@ function addFilterRow() {
   row.innerHTML = filterRowHtml(col.name);
   $('#filterRows').appendChild(row);
   fillFilterOps(row, col.name);
-  updateFilterEmptyState();
 }
 
 function filterRowHtml(colName) {
@@ -640,11 +639,18 @@ function updateFilterValueInputs(row, kind) {
 
 $('#btnAddFilter').addEventListener('click', addFilterRow);
 
+/** 「条件をクリア」: 全部消して、最初の空の1行だけに戻す。 */
+$('#btnClearFilter').addEventListener('click', () => {
+  $('#filterRows').innerHTML = '';
+  filterRowSeq = 0;
+  addFilterRow();
+});
+
 $('#filterRows').addEventListener('click', (ev) => {
   const btn = ev.target.closest('.filter-remove');
   if (!btn) return;
   btn.closest('.filter-row').remove();
-  updateFilterEmptyState();
+  ensureFilterRow();
 });
 
 $('#filterRows').addEventListener('change', (ev) => {
@@ -713,6 +719,14 @@ function describeSelect() {
   return parts.join(' / ');
 }
 
+/** 直前に実行された SQL を、CUI を開かなくても分かるようデータ欄にも出す。 */
+function showLastSql(sql) {
+  const box = $('#lastSqlBox');
+  if (!sql) { box.hidden = true; box.textContent = ''; return; }
+  box.hidden = false;
+  box.textContent = sql;
+}
+
 async function loadRows() {
   const { serverId, database, schema, table } = state.sel;
   if (!table) return;
@@ -728,6 +742,7 @@ async function loadRows() {
 
     // 画面の操作を CUI にも残す。サーバが実際に流した SQL をそのまま出す。
     echoGui(describeSelect(), r.sql, `\\count ${table.name}`);
+    showLastSql(r.sql);
     $('#gridWrap').innerHTML = r.rows.length ? buildGrid(r.columns, r.rows) : '<p class="empty">該当する行がありません</p>';
     const from = r.rows.length ? state.offset + 1 : 0;
     $('#pagerInfo').textContent = `${num(from)}–${num(state.offset + r.rows.length)}`;
@@ -1030,6 +1045,7 @@ $('#btnRunConfirm').addEventListener('click', async () => {
   b.disabled = true;
   const label = b.textContent;
   b.textContent = '実行中…';
+  const editMode = state.editing ? state.editing.mode : null;
   try {
     const r = await state.pending.run();
     const n = r && (r.affected !== undefined ? r.affected : r.inserted);
@@ -1049,6 +1065,8 @@ $('#btnRunConfirm').addEventListener('click', async () => {
     state.pending = null;
     state.editing = null;
     toast(msg, 'ok');
+    // 修正・削除は見落としが無いよう、通知(トースト)に加えてアラートでも知らせる
+    if (editMode === 'update' || editMode === 'delete') alert(msg);
     await (after ? after() : loadRows());
   } catch (err) {
     $('#confirmMessage').className = 'form-message err';
@@ -2193,12 +2211,8 @@ function renderThemeEditor() {
 
   $('#themeEditor').innerHTML = `
     ${colorRows}
-    <div class="theme-group">
-      <div class="theme-group-name">大きさ</div>${sizeRows}
-    </div>
-    <div class="theme-group">
-      <div class="theme-group-name">文言</div>${labelRows}
-    </div>`;
+    ${t.sizes.length ? `<div class="theme-group"><div class="theme-group-name">大きさ</div>${sizeRows}</div>` : ''}
+    ${t.labels.length ? `<div class="theme-group"><div class="theme-group-name">文言</div>${labelRows}</div>` : ''}`;
 }
 
 /** いま実際に効いている値を読む（既定値の表示用）。 */

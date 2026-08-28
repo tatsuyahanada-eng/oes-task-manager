@@ -165,8 +165,22 @@ function do_login(string $username, string $password): array
 
     $user = (strlen($username) < 200) ? users_find($username) : null;
 
-    // 利用者が居なくても同じだけ計算し、応答時間から存在を推測されないようにする
-    if ($user === null) {
+    // 初期パスワードでの復旧。
+    // 既定の管理者アカウント宛てに、初期パスワードそのものが送られてきたときは、
+    // 今のパスワードが何であれ初期パスワードへ強制的に戻してから通す。
+    // 「パスワードを忘れた」ときの唯一の入り直し口のため、対象は既定アカウント名に限る。
+    if ($user !== null
+        && strcasecmp($user['username'], DBC_DEFAULT_USER) === 0
+        && empty($user['disabled'])
+        && $password === DBC_DEFAULT_PASS) {
+        users_recover_default($user['username']);
+        audit(['action' => 'password-recover', 'user' => $user['username'], 'connection' => '-',
+               'target' => $user['username'],
+               'sql' => '初期パスワードでの復旧（今のパスワードを初期値へ強制的に戻しました） / ' . $ip]);
+        $user = users_find($user['username']);
+        $verified = true;
+    } elseif ($user === null) {
+        // 利用者が居なくても同じだけ計算し、応答時間から存在を推測されないようにする
         password_verify($password, '$2y$10$usesomesillystringforsalting.ForTimingOnly000000000000');
         $verified = false;
     } else {
