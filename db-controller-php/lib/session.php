@@ -48,11 +48,27 @@ function session_begin(): void
  * 保存された利用者情報を毎回引き直すので、
  * 管理者が役割を変えたり利用停止にしたりすると、その場で効く。
  */
+/**
+ * いまのセッションが作られた時刻（ミリ秒）。
+ *
+ * current_user() はセッションの鍵を早めに返すため、そのあと $_SESSION は空になる。
+ * ログイン時刻を後から使いたい箇所のために、閉じる前にここへ控えておく。
+ */
+function session_created_at(?int $set = null): int
+{
+    static $v = 0;
+    if ($set !== null) $v = $set;
+    return $v;
+}
+
 function current_user(): ?array
 {
     session_begin();
 
-    if (empty($_SESSION['username']) || empty($_SESSION['createdAt'])) return null;
+    if (empty($_SESSION['username']) || empty($_SESSION['createdAt'])) {
+        session_write_close();
+        return null;
+    }
 
     $now = (int)(microtime(true) * 1000);
     $idle = $now - (int)($_SESSION['lastSeen'] ?? 0);
@@ -63,13 +79,23 @@ function current_user(): ?array
         return null;
     }
 
-    $user = users_find((string)$_SESSION['username']);
+    $_SESSION['lastSeen'] = $now;
+    $username = (string)$_SESSION['username'];
+    session_created_at((int)$_SESSION['createdAt']);
+
+    // ここから先は $_SESSION を触らないので、書き戻して鍵を返す。
+    //
+    // PHP はセッションを開いている間、そのファイルを排他ロックし続ける。
+    // 返さないと、同じ利用者からの 2 本目以降のリクエストが 1 本目の
+    // 終了を待つことになり、画面の起動が要求の本数だけ遅くなる。
+    session_write_close();
+
+    $user = users_find($username);
     if ($user === null || !empty($user['disabled'])) {
         session_destroy_now();
         return null;
     }
 
-    $_SESSION['lastSeen'] = $now;
     return $user;
 }
 

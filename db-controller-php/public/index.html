@@ -32,7 +32,11 @@
   <div class="topbar-right">
     <button class="icon-btn" id="btnInstall" hidden title="ホーム画面に追加">インストール</button>
     <button type="button" class="mode-badge" id="modeBadge" hidden></button>
-    <span class="conn-status" id="connStatus">未接続</span>
+    <!--
+      起動が終わるまで「未接続」と出すと、実際にはこれから繋ぐだけなのに
+      失敗したように見える。分かるまでは中立な表示にしておく。
+    -->
+    <span class="conn-status" id="connStatus">読み込み中…</span>
     <span class="user-chip" id="userChip" hidden>
       <span class="who" id="userName"></span>
       <button class="icon-btn" id="btnLogout" title="ログアウト">ログアウト</button>

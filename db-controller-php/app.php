@@ -213,7 +213,7 @@ function route_auth(string $method, array $seg): void
             'canManageUsers'     => has_role($user, 'admin'),
             'canWrite'           => has_role($user, 'operator'),
             'isDefaultPassword'  => (bool)($user['isDefaultPassword'] ?? false),
-            'loginAt'            => gmdate('Y-m-d\TH:i:s\Z', (int)($_SESSION['createdAt'] / 1000)),
+            'loginAt'            => gmdate('Y-m-d\TH:i:s\Z', (int)(session_created_at() / 1000)),
             'idleTimeoutMinutes' => (int)(idle_ms() / 60000),
         ]);
     }

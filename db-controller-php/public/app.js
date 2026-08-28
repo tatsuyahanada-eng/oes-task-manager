@@ -161,8 +161,12 @@ const num = (v) => Number(v).toLocaleString('ja-JP');
  * ツリー
  * ========================================================== */
 
-async function loadServers() {
-  const { connections } = await api('/api/connections');
+/**
+ * 接続先の一覧を読み込む。
+ * pending に「すでに投げてある問い合わせ」を渡せる（起動時にまとめて投げるため）。
+ */
+async function loadServers(pending = null) {
+  const { connections } = await (pending || api('/api/connections'));
   state.servers = connections;
   renderTree();
   renderServerList();
@@ -294,6 +298,40 @@ async function toggleServer(id) {
  * 二度と中身を取りに行かなくなる（見た目の open は復元されるが、
  * renderTree は静的な HTML を組むだけで、実際の取得は行わないため）。
  */
+/* ------------------------------------------------------------
+ * 前回開いていたサーバを覚えて、次の起動でつなぎ直す
+ *
+ * ログインのたびにツリーを開き直すのは手間なので、
+ * 最後につないだサーバをこの端末に覚えておく。
+ * 覚えるのは接続先の ID だけで、DB のデータは一切保存しない。
+ * ---------------------------------------------------------- */
+
+const LAST_SERVER_KEY = 'dbctl.lastServer';
+
+function rememberLastServer(id) {
+  try { localStorage.setItem(LAST_SERVER_KEY, id); } catch { /* 使えなくても支障はない */ }
+}
+
+function forgetLastServer() {
+  try { localStorage.removeItem(LAST_SERVER_KEY); } catch { /* 同上 */ }
+}
+
+/** 起動時に、前回のサーバへつなぎ直す。無ければ何もしない。 */
+async function restoreLastServer() {
+  let id = null;
+  try { id = localStorage.getItem(LAST_SERVER_KEY); } catch { return; }
+  if (!id) { setStatus('未接続', false); return; }
+
+  // 消された接続先を指したままのことがあるので、実在するか確かめる
+  if (!serverById(id)) { forgetLastServer(); setStatus('未接続', false); return; }
+
+  state.open[nodeKey('srv', id)] = true;
+  const caret = document.querySelector(
+    `[data-kind="server"][data-server="${CSS.escape(id)}"] .tree-caret`);
+  if (caret) caret.classList.add('is-open');
+  await connectServer(id);
+}
+
 async function connectServer(id) {
   const key = nodeKey('srv', id);
   const s = serverById(id);
@@ -308,6 +346,7 @@ async function connectServer(id) {
     ]);
     setStatus(`${s.name}`, true);
     setPrompt(`${s.name}`);
+    rememberLastServer(id);
     const v = (info && info.info && info.info.version) ? String(info.info.version) : '';
     echoGui(`${s.name} に接続${v ? `（${v.split(/[\r\n]/)[0].slice(0, 40)}）` : ''}`,
             null, `\\use ${s.name}`);
@@ -1645,8 +1684,8 @@ document.addEventListener('keydown', (ev) => {
  * ログイン状態
  * ========================================================== */
 
-async function loadAccount() {
-  const me = await api('/api/auth/me');
+async function loadAccount(pending = null) {
+  const me = await (pending || api('/api/auth/me'));
   state.me = me;
   $('#userChip').hidden = false;
   $('#userName').textContent = me.username;
@@ -2386,9 +2425,9 @@ function badgeLabel(key, fallback) {
   return (state.labels && state.labels[key]) || fallback;
 }
 
-async function loadTheme() {
+async function loadTheme(pending = null) {
   try {
-    const t = await api('/api/theme');
+    const t = await (pending || api('/api/theme'));
     state.theme = t;
     applyTheme(t.applied || {});
     if (state.me && state.me.canManageUsers) renderThemeEditor();
@@ -2525,18 +2564,37 @@ $('#btnThemeReset')?.addEventListener('click', () => {
 
 (async function init() {
   try {
-    await loadAccount();
-    const { drivers } = await api('/api/connections/drivers');
+    // 起動に必要な問い合わせは、まとめて一度に投げる。
+    // 1 つずつ待つと、回線の往復にかかる時間が本数分そのまま積み上がり、
+    // 画面が出るまで「つながっていない」ように見えてしまう。
+    const pMe      = api('/api/auth/me');
+    const pDrivers = api('/api/connections/drivers');
+    const pConns   = api('/api/connections');
+    const pTheme   = api('/api/theme').catch(() => null);
+
+    // 役割によって画面の出し分けが変わるので、これだけは先に反映する
+    await loadAccount(pMe);
+
+    const { drivers } = await pDrivers;
     state.drivers = drivers;
     $('#typeSelect').innerHTML = drivers
       .map((d) => `<option value="${d.id}"${d.installed ? '' : ' disabled'}>${d.label}${d.installed ? '' : '（未導入）'}</option>`)
       .join('');
-    await loadServers();
-    await loadUsers();
-    await loadTheme();
+
+    await loadServers(pConns);
+    const theme = await pTheme;
+    if (theme) await loadTheme(Promise.resolve(theme));
+
     setView('tree');
     cout('DB Controller — \\help でコマンド一覧', 'c-info');
     if (!state.servers.length) cout('サーバが未登録です。設定タブから追加してください。', 'c-info');
+
+    // 利用者一覧は管理者しか使わず、最初の画面にも出ない。
+    // 起動を待たせないよう、あとから読み込む。
+    loadUsers();
+
+    // 前回開いていたサーバへ、そのままつなぎ直す
+    restoreLastServer();
   } catch (err) {
     toast(`初期化に失敗しました: ${err.message}`, 'err');
   }
