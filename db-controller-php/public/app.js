@@ -658,6 +658,16 @@ $('#filterRows').addEventListener('change', (ev) => {
   }
 });
 
+// 検索欄で Enter を押したときも、SQL条件欄と同じく「検索」を押したことにする。
+// 条件を入力しただけで押し忘れると、前の結果が出たままになって
+// 「絞り込みが効いていない」ように見えてしまうため。
+$('#filterRows').addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Enter') return;
+  if (!ev.target.classList.contains('filter-val') && !ev.target.classList.contains('filter-val2')) return;
+  ev.preventDefault();
+  $('#btnReload').click();
+});
+
 /** 画面の検索条件を、サーバへ送る形にする。値が要る条件で空欄なら無視する。 */
 function collectFilters() {
   if (!$('#filterPanel') || $('#filterPanel').hidden) return [];
