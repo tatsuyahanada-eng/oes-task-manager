@@ -165,6 +165,12 @@ async function loadServers() {
   renderTree();
   renderServerList();
   updateBadges();
+
+  // 開いたままだったサーバ枝を復元する。renderTree() は
+  // 「開いている見た目」だけを再現するので、中身は改めて取り直す。
+  for (const s of state.servers) {
+    if (state.open[nodeKey('srv', s.id)]) connectServer(s.id);
+  }
 }
 
 function updateBadges() {
@@ -181,15 +187,27 @@ function updateBadges() {
   badge.textContent = w
     ? badgeLabel('writable', '書込可')
     : badgeLabel('readOnly', '読取専用') + (byRole ? '（権限）' : '');
-  badge.title = byRole
-    ? `ログイン中の権限（${state.me.roleLabel || state.me.role}）ではデータを変更できません。`
-    : '';
   badge.className = `mode-badge ${w ? 'is-writable' : ''}`;
 
   const editable = w && state.detail && state.detail.primaryKey.length
     && state.sel.table && state.sel.table.type === 'TABLE';
   $('#btnAddRow').hidden = !editable;
+
+  // 読取専用で、かつ自分で解除できる（管理者）なら、バッジを押せるようにする。
+  // 「なぜ直せないのか」で終わらせず、「ここを押せば直せる」までつなげる。
+  const canFix = !w && !byRole && state.me && state.me.canManageUsers;
+  badge.classList.toggle('is-actionable', canFix);
+  badge.title = byRole
+    ? `ログイン中の権限（${state.me.roleLabel || state.me.role}）ではデータを変更できません。`
+    : (canFix ? 'クリックすると、この接続の設定を開きます。' : '');
 }
+
+$('#modeBadge').addEventListener('click', () => {
+  const id = state.sel.serverId;
+  if (!id || !$('#modeBadge').classList.contains('is-actionable')) return;
+  setView('settings');
+  openServerModal(id);
+});
 
 /** ツリーは「必要になったときに読む」遅延展開。 */
 // 区切りには名前に現れない文字を使う (テーブル名に空白が含まれても衝突しない)
@@ -259,9 +277,27 @@ async function toggleServer(id) {
   const caret = document.querySelector(`[data-kind="server"][data-server="${CSS.escape(id)}"] .tree-caret`);
   if (caret) caret.classList.toggle('is-open', state.open[key]);
   if (!state.open[key]) { setChildren(key, ''); return; }
-  setChildren(key, '<p class="tree-loading">接続中…</p>');
+  await connectServer(id);
+}
 
+/**
+ * サーバへ接続し、その直下（データベース、または DB 切替の無い種別ならスキーマ）を組み立てる。
+ *
+ * 呼び出し元は 2 つある。
+ *   - ツリーでサーバを開いたとき（toggleServer から）
+ *   - 接続設定を保存したあと、「開いていたはずの枝」を復元するとき（loadServers から）
+ *
+ * 後者が無いと、設定変更のたびに loadServers() → renderTree() が
+ * ツリー全体を作り直し、開いていた枝が「読み込み中…」のまま
+ * 二度と中身を取りに行かなくなる（見た目の open は復元されるが、
+ * renderTree は静的な HTML を組むだけで、実際の取得は行わないため）。
+ */
+async function connectServer(id) {
+  const key = nodeKey('srv', id);
   const s = serverById(id);
+  if (!s) return;
+
+  setChildren(key, '<p class="tree-loading">接続中…</p>');
   setStatus(`${s.name} へ接続中…`, false);
   try {
     const [{ databases, supportsDatabaseSwitch }, info] = await Promise.all([
@@ -1426,7 +1462,7 @@ function applyPermissions() {
   const write = Boolean(me.canWrite);
 
   // 接続先の追加・編集は管理者だけ
-  $$('#btnAddServer, #btnAddServerFromTree, #btnFirstServer').forEach((b) => { b.hidden = !admin; });
+  $$('#btnAddServer, #btnAddServerFromTree').forEach((b) => { b.hidden = !admin; });
   $('#usersBlock').hidden = !admin;
   $('#btnAudit').hidden = !admin;
 
@@ -1865,15 +1901,7 @@ $('#userList')?.addEventListener('click', async (ev) => {
  * ここで当てるのは「画面から変えた分」だけで、CSS より優先される。
  * ========================================================== */
 
-/**
- * 配色を当てる先。
- *
- * theme.css は区画ごと（.pane-tree / .pane-data / .pane-cui）に
- * トークンを定義しているので、その外側の #app に変数を入れても
- * 内側の定義に負けて効かない。区画そのものへ入れる。
- * （style 属性は詳細度に関係なく勝つ）
- */
-const THEME_TARGETS = ['.pane-tree', '.pane-data'];
+const THEME_TARGETS = ['#app', '#tabbar'];
 
 /** 変更分を実際の画面へ当てる。 */
 function applyTheme(applied) {
@@ -2085,4 +2113,3 @@ $('#btnThemeReset')?.addEventListener('click', () => {
   }
 })();
 
-$('#btnFirstServer')?.addEventListener('click', () => openServerModal(null));

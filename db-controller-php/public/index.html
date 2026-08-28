@@ -31,7 +31,7 @@
   </nav>
   <div class="topbar-right">
     <button class="icon-btn" id="btnInstall" hidden title="ホーム画面に追加">インストール</button>
-    <span class="mode-badge" id="modeBadge" hidden></span>
+    <button type="button" class="mode-badge" id="modeBadge" hidden></button>
     <span class="conn-status" id="connStatus">未接続</span>
     <span class="user-chip" id="userChip" hidden>
       <span class="who" id="userName"></span>
@@ -64,7 +64,13 @@
       <input type="search" id="treeFilter" placeholder="テーブル名で絞り込み">
     </div>
     <div class="tree" id="tree">
-      <p class="empty">サーバが未登録です<br><button class="btn btn-sm btn-primary" id="btnFirstServer">+ サーバを追加</button></p>
+      <!--
+        起動直後は「登録済みかどうか」がまだ分からない。
+        ここで「未登録」と決め打ちすると、実際は登録済みの利用者にも
+        一瞬「サーバが消えた」ように見えてしまう。
+        分かるまでは中立な「読み込み中」を出す。
+      -->
+      <p class="empty" id="treeInitial">読み込み中…</p>
     </div>
   </section>
 
@@ -128,7 +134,7 @@
         <button class="btn btn-sm btn-primary" id="btnAddServer">+ サーバを追加</button>
       </div>
     </div>
-    <div class="server-list" id="serverList"></div>
+    <div class="server-list" id="serverList"><p class="empty">読み込み中…</p></div>
 
     <div class="settings-about">
       <h3>アカウント</h3>

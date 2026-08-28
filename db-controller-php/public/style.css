@@ -112,15 +112,21 @@ body {
 .conn-status.is-connected { color: var(--ok); border-color: #24503f; }
 
 .mode-badge {
+  font: inherit;
   font-family: var(--mono);
   font-size: 10px;
   padding: 3px 7px;
   border-radius: 4px;
   border: 1px solid var(--border-strong);
+  background: none;
   color: var(--text-mute);
   white-space: nowrap;
+  cursor: default;
 }
 .mode-badge.is-writable { color: #17111f; background: var(--write); border-color: var(--write); font-weight: 700; }
+/* 管理者には「読取専用」を押せるボタンにして、設定画面へ直接誘導する */
+.mode-badge.is-actionable { cursor: pointer; }
+.mode-badge.is-actionable:hover { background: var(--bg-hover); border-color: var(--accent); color: var(--accent); }
 
 .icon-btn {
   font: inherit;

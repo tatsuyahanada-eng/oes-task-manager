@@ -1,16 +1,10 @@
 /* ============================================================
- * DB Controller — 配色と文字の大きさ
+ * DB Controller — 配色と文言の設定
  *
- * 画面を 3 つの区画に分けて考えます。
+ * このファイルだけを直せば、下側（作業エリア）の見た目を変えられます。
+ * 上部のタイトルバーとメニューは style.css のままで、ここでは変わりません。
  *
- *   1. 上部バー（タイトル・メニュー）… style.css のまま。ここでは触りません
- *   2. ツリー と データ欄          … 白基調。下の「白の区画」で決めます
- *   3. CUI                          … 黒のまま。端末らしさを保つため
- *
- * CSS 変数は中の部品へ引き継がれるので、区画の外枠に指定するだけで
- * その中身すべてに効きます。
- *
- * 直し方は 2 通り。
+ * 直し方は 2 通りあります。
  *   A. このファイルの値を書き換える（全員に効く。恒久的な変更向け）
  *   B. 画面の「設定 → 配色」で変える（管理者が画面から。すぐ試せる）
  *
@@ -19,117 +13,80 @@
  * ========================================================== */
 
 /* ------------------------------------------------------------
- * 白の区画 — ツリーとデータ欄
+ * 作業エリアの配色
  *
- * 設定画面も白にしたい場合は、下のセレクタに .pane-settings を足してください。
+ * .app       … ツリー・データ・CUI・設定が入る本体
+ * .tabbar    … スマホの下部タブ
+ *
+ * ここで指定した値は、中のすべての部品に引き継がれます。
+ * 上部バーは外側にあるので影響を受けません。
  * ---------------------------------------------------------- */
 
-.pane-tree,
-.pane-data {
+.app,
+.tabbar {
   /* --- 背景 --- */
-  --bg:           #ffffff;   /* 一番下の背景 */
-  --bg-panel:     #f7f9fc;   /* パネル・カード */
-  --bg-raise:     #eef2f7;   /* 一段持ち上がった面（見出し行など） */
-  --bg-hover:     #e4ebf3;   /* マウスを乗せたとき */
+  --bg:           #0d1117;   /* 一番下の背景 */
+  --bg-panel:     #12171f;   /* パネル・カード */
+  --bg-raise:     #1a212b;   /* 一段持ち上がった面（見出し行など） */
+  --bg-hover:     #232c38;   /* マウスを乗せたとき */
 
   /* --- 線 --- */
-  --border:        #d9e0e8;  /* 通常の区切り線 */
-  --border-strong: #b3bfcc;  /* 目立たせたい線 */
+  --border:        #262e3a;  /* 通常の区切り線 */
+  --border-strong: #38424f;  /* 目立たせたい線 */
 
   /* --- 文字 --- */
-  --text:      #16202b;      /* 本文 */
-  --text-mute: #55636f;      /* 補足 */
-  --text-dim:  #64717e;      /* さらに控えめ（単位・注記）。白地でも読める濃さにする */
+  --text:      #e9eef5;      /* 本文 */
+  --text-mute: #8d9aab;      /* 補足 */
+  --text-dim:  #5b6775;      /* さらに控えめ（単位・注記） */
 
-  /* --- 状態を表す色。白地でも読めるよう、暗めに寄せています --- */
-  --accent:     #0b62c4;     /* 選択中・リンク */
-  --accent-dim: #dbeafe;     /* 選択中の背景 */
-  --ok:         #0a7a5e;     /* 成功 */
-  --warn:       #9a6800;     /* 注意 */
-  --danger:     #c0362c;     /* 削除・危険 */
-  --write:      #7038c8;     /* 書き込み可 */
+  /* --- 状態を表す色 --- */
+  --accent:     #4ea1ff;     /* 選択中・リンク */
+  --accent-dim: #14263a;     /* 選択中の背景 */
+  --ok:         #5fe3c0;     /* 成功 */
+  --warn:       #e3b341;     /* 注意 */
+  --danger:     #ff6b5e;     /* 削除・危険 */
+  --write:      #d2a8ff;     /* 書き込み可 */
 
   /* --- 文字の大きさ --- */
   --ws-font-size:   15px;    /* 作業エリアの基準サイズ */
   --ws-grid-size:   14px;    /* データ表 */
   --ws-line-height: 1.65;
+}
 
-  background: var(--bg);
-  color: var(--text);
+/* 作業エリアの文字サイズと背景を、上のトークンから反映する。
+   背景は .app 自身で塗る。body 任せにすると、ここで --bg を変えても効かない。 */
+.app {
   font-size: var(--ws-font-size);
   line-height: var(--ws-line-height);
-}
-
-/* データ表。行が詰まりすぎないよう、少し余白を足す */
-.pane-data .grid { font-size: var(--ws-grid-size); }
-.pane-data .grid th,
-.pane-data .grid td { padding-top: 7px; padding-bottom: 7px; }
-
-/* 白地では、選択行に色を敷いた方が分かりやすい */
-.pane-tree .tree-row.is-selected { background: var(--accent-dim); }
-
-/* ------------------------------------------------------------
- * 黒の区画 — CUI
- *
- * 端末らしさを保つため、意図的に暗いままにしています。
- * 白にしたい場合は、上の「白の区画」と同じ値をここへ書いてください。
- * ---------------------------------------------------------- */
-
-.pane-cui {
-  --bg:           #0b0e13;
-  --bg-panel:     #12171f;
-  --bg-raise:     #1a212b;
-  --bg-hover:     #232c38;
-
-  --border:        #262e3a;
-  --border-strong: #38424f;
-
-  --text:      #e9eef5;
-  --text-mute: #8d9aab;
-  --text-dim:  #5b6775;
-
-  --accent:     #4ea1ff;
-  --accent-dim: #14263a;
-  --ok:         #5fe3c0;
-  --warn:       #e3b341;
-  --danger:     #ff6b5e;
-  --write:      #d2a8ff;
-
-  /* CUI の文字。GUI の操作を追いながら読むので、少し大きめ */
-  --cui-font-size: 14.5px;
-
   background: var(--bg);
   color: var(--text);
 }
-
-.pane-cui .console,
-.pane-cui .console-input input {
-  font-size: var(--cui-font-size);
-  line-height: 1.7;
-}
+.grid { font-size: var(--ws-grid-size); }
+.tabbar { background: var(--bg-panel); color: var(--text); }
 
 /* ------------------------------------------------------------
  * CUI に出す「GUI 操作の記録」の色分け
  * ---------------------------------------------------------- */
 
-.c-gui  { color: #7fd4a8; }              /* どの操作をしたか */
-.c-sql  { color: #e9eef5; font-weight: 600; }  /* 実際に流れた SQL */
-.c-hint { color: #8d9aab; }              /* 同じことを CUI でやる書き方 */
+.c-gui  { color: #7fd4a8; }                    /* どの操作をしたか */
+.c-sql  { color: var(--text); font-weight: 600; }  /* 実際に流れた SQL */
+.c-hint { color: var(--text-mute); }           /* 同じことを CUI でやる書き方 */
+
+/* CUI の入力欄も、作業エリアと同じ大きさにする */
+.console-input input { font-size: var(--ws-font-size); }
 
 /* ------------------------------------------------------------
- * 明るい配色の例（CUI も白くしたい場合）
+ * 明るい配色の例
  *
- * 使うときは、上の .pane-cui のブロックを丸ごと
+ * 使うときは、上の .app, .tabbar のブロックを丸ごと
  * 下の値で置き換えてください。
  * ---------------------------------------------------------- */
 /*
-.pane-cui {
-  --bg: #ffffff; --bg-panel: #f7f9fc; --bg-raise: #eef2f7; --bg-hover: #e4ebf3;
-  --border: #d9e0e8; --border-strong: #b3bfcc;
-  --text: #16202b; --text-mute: #55636f; --text-dim: #7d8a97;
-  --accent: #0b62c4; --accent-dim: #dbeafe;
-  --ok: #0a7a5e; --warn: #9a6800; --danger: #c0362c; --write: #7038c8;
-  --cui-font-size: 14.5px;
-  background: var(--bg); color: var(--text);
+.app, .tabbar {
+  --bg: #f6f8fa; --bg-panel: #ffffff; --bg-raise: #eef1f5; --bg-hover: #e3e8ee;
+  --border: #d5dbe3; --border-strong: #b6c0cc;
+  --text: #1c2530; --text-mute: #5a6674; --text-dim: #8a95a3;
+  --accent: #0b66d0; --accent-dim: #dbe9fb;
+  --ok: #0a7f63; --warn: #9a6b00; --danger: #c0362c; --write: #7a3fbf;
 }
 */
