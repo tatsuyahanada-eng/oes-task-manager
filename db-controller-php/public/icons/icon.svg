@@ -1,13 +1,54 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="#22d3c5"/><stop offset="55%" stop-color="#2f9fe0"/><stop offset="100%" stop-color="#3f6ae0"/>
+    <linearGradient id="cyl" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0%" stop-color="#f2f4f7"/>
+      <stop offset="45%" stop-color="#c7ccd6"/>
+      <stop offset="100%" stop-color="#8891a0"/>
     </linearGradient>
+    <linearGradient id="cylTop" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#c9ced9"/>
+    </linearGradient>
+    <linearGradient id="gear" x1="0.2" y1="0" x2="0.9" y2="1">
+      <stop offset="0%" stop-color="#e4e7ec"/>
+      <stop offset="55%" stop-color="#aab0bd"/>
+      <stop offset="100%" stop-color="#6d7686"/>
+    </linearGradient>
+    <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#0d1117" flood-opacity="0.35"/>
+    </filter>
+    <!-- 歯車の穴。中心の円だけ黒くして、そこだけ透明にする -->
+    <mask id="gearHole" maskUnits="userSpaceOnUse" x="222" y="208" width="272" height="272">
+      <rect x="222" y="208" width="272" height="272" fill="#ffffff"/>
+      <circle cx="358" cy="344" r="32" fill="#000000"/>
+    </mask>
   </defs>
-  <rect width="512" height="512" rx="104" fill="url(#bg)"/>
-  <g fill="none" stroke="#ffffff" stroke-width="20">
-    <ellipse cx="256" cy="168" rx="120" ry="46"/>
-    <path d="M136 168v176c0 25 54 46 120 46s120-21 120-46V168"/>
-    <path d="M136 256c0 25 54 46 120 46s120-21 120-46"/>
+
+  <g filter="url(#shadow)">
+    <!-- データベースの円柱 -->
+    <g stroke="#5b6472" stroke-width="3">
+      <path d="M110 170 L110 380 A128,52 0 0,0 366,380 L366,170 Z" fill="url(#cyl)"/>
+      <path d="M110 240 A128,20 0 0,0 366,240" fill="none" stroke-width="3" opacity="0.55"/>
+      <path d="M110 310 A128,20 0 0,0 366,310" fill="none" stroke-width="3" opacity="0.55"/>
+      <ellipse cx="238" cy="170" rx="128" ry="52" fill="url(#cylTop)"/>
+    </g>
+    <ellipse cx="200" cy="152" rx="66" ry="18" fill="#ffffff" opacity="0.55"/>
+
+    <!-- 歯車バッジ -->
+    <g mask="url(#gearHole)">
+      <g fill="url(#gear)" stroke="#5b6472" stroke-width="3" transform="translate(358 344)">
+        <rect x="-32.1" y="-101.2" width="64.2" height="49.4" rx="9" transform="rotate(0.0)"/>
+        <rect x="-32.1" y="-101.2" width="64.2" height="49.4" rx="9" transform="rotate(45.0)"/>
+        <rect x="-32.1" y="-101.2" width="64.2" height="49.4" rx="9" transform="rotate(90.0)"/>
+        <rect x="-32.1" y="-101.2" width="64.2" height="49.4" rx="9" transform="rotate(135.0)"/>
+        <rect x="-32.1" y="-101.2" width="64.2" height="49.4" rx="9" transform="rotate(180.0)"/>
+        <rect x="-32.1" y="-101.2" width="64.2" height="49.4" rx="9" transform="rotate(225.0)"/>
+        <rect x="-32.1" y="-101.2" width="64.2" height="49.4" rx="9" transform="rotate(270.0)"/>
+        <rect x="-32.1" y="-101.2" width="64.2" height="49.4" rx="9" transform="rotate(315.0)"/>
+        <circle r="76"/>
+      </g>
+    </g>
+    <circle cx="358" cy="344" r="32" fill="none" stroke="#5b6472" stroke-width="3"/>
+    <ellipse cx="332" cy="312" rx="24" ry="9" fill="#ffffff" opacity="0.45" transform="rotate(-35 332 312)"/>
   </g>
 </svg>
