@@ -701,6 +701,8 @@ select option { background: var(--bg-raise); color: var(--text); }
   .sheet-backdrop { align-items: center; padding: 20px; }
   .sheet { border-radius: 12px; width: min(720px, 100%); max-height: 88vh; }
   .sheet-narrow { width: min(540px, 100%); }
+  /* 読み取ったテーブル構成の一覧は列が多いので、その画面だけ広く使う */
+  .sheet-wide { width: min(1180px, 100%); }
 
   input:not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([type=hidden]),
   select {
@@ -742,6 +744,24 @@ select option { background: var(--bg-raise); color: var(--text); }
 
 .csv-panel .check { margin-bottom: 9px; }
 .csv-panel .field { margin-top: 4px; }
+
+/* ---------- CSV から読み取ったテーブル構成 ---------- */
+.plan-wrap { max-height: 42vh; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 4px; }
+table.plan-grid th { white-space: nowrap; }
+table.plan-grid td { vertical-align: middle; }
+table.plan-grid input[type=text],
+table.plan-grid select { width: 100%; min-width: 0; padding: 3px 6px; font-size: 12px; min-height: 26px; }
+.plan-grid .plan-name { min-width: 120px; }
+.plan-grid .plan-kind { min-width: 96px; }
+.plan-grid .plan-sizes { white-space: nowrap; }
+.plan-grid .plan-size { width: 58px; padding: 3px 5px; font-size: 12px; min-height: 26px; }
+.plan-grid .plan-size + .plan-size { margin-left: 4px; }
+.plan-grid .plan-mid { text-align: center; }
+.plan-grid .plan-mid input { width: 16px; height: 16px; accent-color: var(--accent); }
+.plan-grid .plan-src { color: var(--text-mute); white-space: nowrap; }
+.plan-grid .plan-sample { color: var(--text-dim); max-width: 220px; overflow: hidden;
+                          text-overflow: ellipsis; white-space: nowrap; }
+.notice.warn { border-color: var(--warn); color: var(--warn); }
 
 input[type=file] {
   font-family: var(--sans);

@@ -194,6 +194,62 @@ function csv_encoding_label(string $id): string
     return $id;
 }
 
+/** 真偽値の列か（MySQL の TINYINT(1)、PostgreSQL の boolean、SQL Server の bit）。 */
+function csv_is_bool_column(string $dataType): bool
+{
+    $t = strtolower(trim($dataType));
+    return $t === 'boolean' || $t === 'bool' || $t === 'bit' || $t === 'tinyint(1)';
+}
+
+/**
+ * 真偽値の列に入れる値をそろえる。
+ *
+ * CSV には true / false / Y / N / 1 / 0 が混ざって来る。
+ * MySQL の TINYINT(1) は "true" という文字列を受け付けないため、
+ * 取り込む前に 1 / 0 に直す。読み取れない値はそのまま渡し、
+ * DB 側のエラーとして行番号つきで知らせる。
+ */
+function csv_bool_value(string $v): string
+{
+    $t = strtolower(trim($v));
+    if (in_array($t, ['1', 'true', 't', 'yes', 'y'], true)) return '1';
+    if (in_array($t, ['0', 'false', 'f', 'no', 'n'], true)) return '0';
+    return $v;
+}
+
+/** 日付・日時の列か。 */
+function csv_is_date_column(string $dataType): bool
+{
+    $t = strtolower(trim($dataType));
+    return $t === 'date' || strpos($t, 'datetime') === 0 || strpos($t, 'timestamp') === 0;
+}
+
+/**
+ * 日付の書き方をそろえる。
+ *
+ * Oracle から抜いた CSV は 26-AUG-26 や 2026/08/26 の形で来るが、
+ * MySQL / PostgreSQL はそのままでは受け取らない。
+ * 取り込む前に YYYY-MM-DD へ直す。時刻が付いていればそのまま残す。
+ * 読み取れない値は触らずに渡し、DB 側のエラーとして行番号つきで知らせる。
+ */
+function csv_date_value(string $v): string
+{
+    $v = trim($v);
+    // 「日付 時刻」に分ける（時刻は無いこともある）
+    $time = '';
+    if (preg_match('/^(.+?)[ T](\d{1,2}:\d{2}(:\d{2})?(\.\d+)?)$/', $v, $m)) {
+        $datePart = $m[1];
+        $time = ' ' . $m[2];
+    } else {
+        $datePart = $v;
+    }
+
+    $p = infer_date_parts($datePart);
+    if ($p === null || !checkdate($p[1], $p[2], $p[0])) return $v;
+
+    return sprintf('%04d-%02d-%02d', $p[0], $p[1], $p[2]) . $time;
+}
+
 /**
  * 取り込みの実行。
  *
@@ -232,7 +288,12 @@ function csv_import(DbDriver $drv, string $schema, string $table,
             foreach ($matched as $m) {
                 $v = $r[$m['index']] ?? null;
                 // 空欄は NULL として入れる（空文字ではなく）
-                $params[] = ($v === '' || $v === null) ? null : $v;
+                if ($v === '' || $v === null) { $params[] = null; continue; }
+                // 真偽値の列だけ、true / Y などを 1 / 0 にそろえる
+                if (csv_is_bool_column((string)$m['dataType'])) $v = csv_bool_value((string)$v);
+                // 日付の列だけ、26-AUG-26 などを YYYY-MM-DD にそろえる
+                elseif (csv_is_date_column((string)$m['dataType'])) $v = csv_date_value((string)$v);
+                $params[] = $v;
             }
             try {
                 $st->execute($params);

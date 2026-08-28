@@ -436,6 +436,7 @@
 
     <div class="seg" id="csvTabs">
       <button class="seg-btn is-active" data-csv="export">出力</button>
+      <button class="seg-btn" data-csv="newtable">テーブル作成</button>
       <button class="seg-btn" data-csv="import">取り込み</button>
       <button class="seg-btn" data-csv="backup">一括バックアップ</button>
     </div>
@@ -466,6 +467,65 @@
       <div class="sheet-actions">
         <span class="spacer"></span>
         <button type="button" class="btn btn-primary" id="btnExportTable">このテーブルを出力</button>
+      </div>
+    </section>
+
+    <!-- CSV からテーブルを作る -->
+    <section class="csv-panel" data-csv-panel="newtable">
+      <div class="notice danger" id="newTableReadonly" hidden>
+        この接続は<strong>読み取り専用</strong>です。テーブルを作るには設定で解除してください。
+      </div>
+      <div class="notice">
+        CSV を読み込むと、<strong>全行</strong>を調べて列の型・桁・NULL の有無を推定します。
+        推定結果は下の一覧でそのまま直せます。作成するまで DB は変更しません。
+      </div>
+
+      <label class="field">
+        <span>CSV ファイル</span>
+        <input type="file" id="newTableFile" accept=".csv,.txt,text/csv">
+      </label>
+
+      <div id="newTableResult" hidden>
+        <div class="field-row">
+          <label class="field">
+            <span>作るテーブル名 <em>*</em></span>
+            <input type="text" id="newTableName" autocapitalize="off" spellcheck="false">
+          </label>
+          <label class="field field-narrow">
+            <span>読み取った行数</span>
+            <input type="text" id="newTableRows" readonly>
+          </label>
+        </div>
+
+        <label class="check">
+          <input type="checkbox" id="newTableSurrogate">
+          自動採番の主キー列 <code>id</code> を先頭に足す
+        </label>
+
+        <p class="section-label">読み取ったテーブル構成</p>
+        <div id="newTableNotes"></div>
+        <div class="grid-wrap plan-wrap">
+          <table class="grid plan-grid">
+            <thead>
+              <tr>
+                <th>CSV の見出し</th><th>列名</th><th>型</th><th>桁</th>
+                <th>NULL</th><th>主キー</th><th>除外</th>
+                <th>空欄</th><th>最大長</th><th>実際の値</th>
+              </tr>
+            </thead>
+            <tbody id="newTableCols"></tbody>
+          </table>
+        </div>
+
+        <p class="section-label">実行される SQL</p>
+        <pre class="sql-block" id="newTableSql"></pre>
+      </div>
+
+      <p class="form-message" id="newTableMessage"></p>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btnNewTableRead">構成を読み取る</button>
+        <button type="button" class="btn btn-write" id="btnNewTableCreate" disabled>テーブルを作る</button>
       </div>
     </section>
 

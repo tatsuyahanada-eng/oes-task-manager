@@ -228,6 +228,136 @@ abstract class DbDriver
     abstract public function listTables(string $schema): array;
     abstract public function describeTable(string $schema, string $table): array;
 
+    /** 読み取った型の区分を、その DB の型名に直す。 */
+    abstract public function sqlType(array $col): string;
+
+    /** 自動採番の主キー 1 列分の定義。 */
+    abstract public function surrogateKeySql(string $name): string;
+
+    /* ------------------------------------------------------------
+     * CSV から読み取った構成でテーブルを作る
+     * ---------------------------------------------------------- */
+
+    /** 画面から来た列の定義を検査して、安全な形に整える。 */
+    public function assertColumnPlan(array $columns): array
+    {
+        $kinds = ['int', 'bigint', 'decimal', 'bool', 'date', 'datetime', 'varchar', 'text'];
+        if (!$columns) throw bad('列が 1 つもありません。');
+        if (count($columns) > 300) throw bad('列が多すぎます（300 列まで）。');
+
+        $out = [];
+        $seen = [];
+        foreach ($columns as $c) {
+            if (!is_array($c)) throw bad('列の指定が正しくありません。');
+            // 取り込まない列は飛ばす
+            if (!empty($c['skip'])) continue;
+
+            $name = $this->assertIdentifier(trim((string)($c['name'] ?? '')), '列名');
+            $key = mb_strtolower($name);
+            if (isset($seen[$key])) throw bad("列名「{$name}」が重複しています。");
+            $seen[$key] = true;
+
+            $kind = (string)($c['kind'] ?? '');
+            if (!in_array($kind, $kinds, true)) throw bad("列「{$name}」の型の指定が正しくありません。");
+
+            $length = null;
+            if ($kind === 'varchar') {
+                $length = (int)($c['length'] ?? 255);
+                if ($length < 1 || $length > 4000) {
+                    throw bad("列「{$name}」の桁は 1〜4000 で指定してください。");
+                }
+            }
+
+            $precision = $scale = null;
+            if ($kind === 'decimal') {
+                $precision = (int)($c['precision'] ?? 18);
+                $scale     = (int)($c['scale'] ?? 2);
+                if ($precision < 1 || $precision > 38) {
+                    throw bad("列「{$name}」の全体の桁は 1〜38 で指定してください。");
+                }
+                if ($scale < 0 || $scale >= $precision) {
+                    throw bad("列「{$name}」の小数の桁は、全体の桁より小さくしてください。");
+                }
+            }
+
+            $out[] = [
+                'name'       => $name,
+                'kind'       => $kind,
+                'length'     => $length,
+                'precision'  => $precision,
+                'scale'      => $scale,
+                'nullable'   => (bool)($c['nullable'] ?? true),
+                'primaryKey' => (bool)($c['primaryKey'] ?? false),
+            ];
+        }
+
+        if (!$out) throw bad('取り込む列が 1 つもありません。');
+        return $out;
+    }
+
+    /**
+     * CREATE TABLE 文を組み立てる。
+     * 識別子は必ず quote() を通し、型は決められた区分からしか作らない。
+     */
+    public function buildCreateTable(string $schema, string $table, array $columns,
+                                     string $surrogateKey = ''): string
+    {
+        $this->assertIdentifier($schema, 'スキーマ名');
+        $this->assertIdentifier($table, 'テーブル名');
+
+        $lines = [];
+        $pk = [];
+
+        if ($surrogateKey !== '') {
+            $sk = $this->assertIdentifier(trim($surrogateKey), '主キーの列名');
+            foreach ($columns as $c) {
+                if (mb_strtolower($c['name']) === mb_strtolower($sk)) {
+                    throw bad("自動採番の列名「{$sk}」が、CSV の列と重なっています。別の名前にしてください。");
+                }
+            }
+            $lines[] = '  ' . $this->surrogateKeySql($sk);
+            $pk[] = $this->quote($sk);
+        }
+
+        foreach ($columns as $c) {
+            $line = '  ' . $this->quote($c['name']) . ' ' . $this->sqlType($c);
+            // 主キーにする列は、NULL を許さない
+            if (!$c['nullable'] || $c['primaryKey']) $line .= ' NOT NULL';
+            $lines[] = $line;
+            if ($c['primaryKey'] && $surrogateKey === '') $pk[] = $this->quote($c['name']);
+        }
+
+        if ($pk) $lines[] = '  PRIMARY KEY (' . implode(', ', $pk) . ')';
+
+        return 'CREATE TABLE ' . $this->qualify($schema, $table) . " (\n"
+             . implode(",\n", $lines) . "\n)";
+    }
+
+    /** 同じ名前のテーブルが既にあるか。 */
+    public function tableExists(string $schema, string $table): bool
+    {
+        foreach ($this->listTables($schema) as $t) {
+            if (strcasecmp($t['name'], $table) === 0) return true;
+        }
+        return false;
+    }
+
+    /** テーブルを実際に作る。 */
+    public function createTable(string $schema, string $table, array $columns,
+                                string $surrogateKey = ''): string
+    {
+        if ($this->tableExists($schema, $table)) {
+            throw bad("テーブル「{$table}」は既にあります。別の名前にしてください。");
+        }
+        $sql = $this->buildCreateTable($schema, $table, $columns, $surrogateKey);
+        try {
+            $this->pdo->exec($sql);
+        } catch (PDOException $e) {
+            throw bad('テーブルを作れませんでした: ' . $e->getMessage(), 502);
+        }
+        return $sql;
+    }
+
     /** 完全修飾したテーブル名。 */
     public function qualify(string $schema, string $table): string
     {

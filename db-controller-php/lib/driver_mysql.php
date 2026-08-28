@@ -147,6 +147,26 @@ class MysqlDriver extends DbDriver
         return '`' . str_replace('`', '``', $name) . '`';
     }
 
+    /** 読み取った型の区分を MySQL の型名に直す。 */
+    public function sqlType(array $col): string
+    {
+        switch ($col['kind']) {
+            case 'int':      return 'INT';
+            case 'bigint':   return 'BIGINT';
+            case 'decimal':  return "DECIMAL({$col['precision']},{$col['scale']})";
+            case 'bool':     return 'TINYINT(1)';
+            case 'date':     return 'DATE';
+            case 'datetime': return 'DATETIME';
+            case 'varchar':  return "VARCHAR({$col['length']})";
+            default:         return 'TEXT';
+        }
+    }
+
+    public function surrogateKeySql(string $name): string
+    {
+        return $this->quote($name) . ' BIGINT NOT NULL AUTO_INCREMENT';
+    }
+
     public function serverInfo(): array
     {
         $row = $this->one('SELECT VERSION() AS version, DATABASE() AS db, CURRENT_USER() AS usr');

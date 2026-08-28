@@ -393,6 +393,13 @@ async function toggleSchema(serverId, database, schema, forceOpen = false) {
   if (caret) caret.classList.toggle('is-open', state.open[key]);
   if (!state.open[key]) { setChildren(key, ''); return; }
 
+  // 開いたスキーマを「いま見ている場所」として覚える。
+  // テーブルを開かずにスキーマ単位で行う操作（CSV からのテーブル作成、
+  // 一括バックアップ、CUI の \tables）が、これを頼りにしている。
+  state.sel.serverId = serverId;
+  state.sel.database = database;
+  state.sel.schema = schema;
+
   setChildren(key, '<p class="tree-loading">テーブルを読み込み中…</p>');
   try {
     const { tables } = await api(dbPath(serverId, 'tables', { database, schema }));
@@ -1770,6 +1777,11 @@ $('#btnCsv').addEventListener('click', async () => {
   $('#btnCsvImport').disabled = true;
   csvPreviewData = null;
 
+  // 開き直すたびに「出力」から始めるので、幅も既定へ戻す
+  $('#csvModal .sheet').classList.remove('sheet-wide');
+  $('#newTableFile').value = '';
+  resetNewTablePanel();
+
   $('#csvModal').hidden = false;
   loadBackupInfo();
 });
@@ -1779,6 +1791,8 @@ $('#btnCloseCsv').addEventListener('click', () => { $('#csvModal').hidden = true
 $$('#csvTabs .seg-btn').forEach((b) => b.addEventListener('click', () => {
   $$('#csvTabs .seg-btn').forEach((x) => x.classList.toggle('is-active', x === b));
   $$('.csv-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.csvPanel === b.dataset.csv));
+  // 構成の一覧は列が多いので、その画面のときだけシートを広げる
+  $('#csvModal .sheet').classList.toggle('sheet-wide', b.dataset.csv === 'newtable');
 }));
 
 /** 出力用のクエリ文字列を組み立てる。 */
@@ -1853,6 +1867,216 @@ $('#btnBackupZip').addEventListener('click', () => {
   const qs = csvQuery({ schema, includeViews: $('#csvIncludeViews').checked ? 'true' : '' });
   download(`/api/db/${serverId}/export/schema.zip?${qs}`);
   toast('ZIP を作成しています。大きいと時間がかかります…', 'ok');
+});
+
+/* ============================================================
+ * CSV からテーブルを作る
+ *
+ * 流れ:
+ *   1. CSV を選んで「構成を読み取る」 … サーバが全行を調べて型を推定する（DB は触らない）
+ *   2. 一覧で型・桁・NULL・主キーを直す … 直すたびに SQL を組み立て直す
+ *   3. 「テーブルを作る」 … ここで初めて CREATE TABLE が走る
+ * ========================================================== */
+
+/** 読み取り結果と、元の CSV。作成するまで持っておく。 */
+let newTablePlan = null;
+
+/** 型の選択肢。サーバ側 assertColumnPlan の許す区分と揃えること。 */
+const PLAN_KINDS = [
+  ['varchar',  '文字列'],
+  ['text',     '長い文字列'],
+  ['int',      '整数'],
+  ['bigint',   '整数（大）'],
+  ['decimal',  '小数'],
+  ['date',     '日付'],
+  ['datetime', '日時'],
+  ['bool',     '真偽'],
+];
+
+function resetNewTablePanel() {
+  newTablePlan = null;
+  $('#newTableResult').hidden = true;
+  $('#newTableMessage').textContent = '';
+  $('#newTableMessage').className = 'form-message';
+  $('#btnNewTableCreate').disabled = true;
+  $('#newTableReadonly').hidden = canWrite(state.sel.serverId);
+}
+
+$('#newTableFile').addEventListener('change', resetNewTablePanel);
+
+$('#btnNewTableRead').addEventListener('click', async () => {
+  const file = $('#newTableFile').files[0];
+  const msg = $('#newTableMessage');
+  msg.className = 'form-message';
+  if (!file) { msg.className = 'form-message err'; msg.textContent = 'CSV ファイルを選んでください。'; return; }
+  if (!state.sel.schema) { msg.className = 'form-message err'; msg.textContent = 'ツリーでスキーマを選んでください。'; return; }
+
+  msg.textContent = '読み取っています…';
+  $('#btnNewTableCreate').disabled = true;
+  try {
+    const buffer = await file.arrayBuffer();
+    const { serverId, database, schema } = state.sel;
+    const q = new URLSearchParams({ schema, filename: file.name });
+    if (database) q.set('database', database);
+    const enc = $('#csvEncoding').value;
+    const del = $('#csvDelimiter').value;
+    if (enc && enc !== 'auto') q.set('encoding', enc);
+    if (del && del !== 'auto') q.set('delimiter', del);
+
+    const plan = await postCsv(`/api/db/${serverId}/infer?${q}`, buffer);
+    newTablePlan = plan;
+    renderNewTable(plan);
+    msg.textContent = '';
+
+    echoGui(
+      `${file.name} からテーブル構成を読み取り（${num(plan.rowCount)} 行 / ${plan.columnCount} 列）`,
+      plan.sql || null,
+      `\\d ${plan.tableName}`
+    );
+  } catch (err) {
+    msg.className = 'form-message err';
+    msg.textContent = err.message;
+  }
+});
+
+/** 読み取り結果を一覧に描く。 */
+function renderNewTable(plan) {
+  $('#newTableResult').hidden = false;
+  $('#newTableName').value = plan.tableName;
+  $('#newTableRows').value = `${num(plan.rowCount)} 行`;
+  $('#newTableSurrogate').checked = Boolean(plan.addSurrogateKey);
+
+  $('#newTableNotes').innerHTML = (plan.notes || [])
+    .map((n) => `<div class="notice warn">${esc(n)}</div>`).join('');
+
+  $('#newTableCols').innerHTML = plan.columns.map((c, i) => {
+    const kinds = PLAN_KINDS.map(([v, label]) =>
+      `<option value="${v}"${v === c.kind ? ' selected' : ''}>${label}</option>`).join('');
+    // 桁は文字列だけ、精度は小数だけが対象
+    const size = c.kind === 'varchar'
+      ? `<input type="number" class="plan-size" data-plan="length" min="1" max="4000" value="${c.length || 255}">`
+      : (c.kind === 'decimal'
+        ? `<input type="number" class="plan-size" data-plan="precision" min="1" max="38" value="${c.precision || 18}">`
+          + `<input type="number" class="plan-size" data-plan="scale" min="0" max="10" value="${c.scale || 2}">`
+        : '<span class="muted">—</span>');
+
+    return `<tr data-i="${i}" title="${esc(c.reason || '')}">
+      <td class="plan-src">${esc(c.csvColumn)}</td>
+      <td><input type="text" class="plan-name" data-plan="name" value="${esc(c.name)}"></td>
+      <td><select class="plan-kind" data-plan="kind">${kinds}</select></td>
+      <td class="plan-sizes">${size}</td>
+      <td class="plan-mid"><input type="checkbox" data-plan="nullable"${c.nullable ? ' checked' : ''}></td>
+      <td class="plan-mid"><input type="checkbox" data-plan="primaryKey"${c.primaryKey ? ' checked' : ''}></td>
+      <td class="plan-mid"><input type="checkbox" data-plan="skip"></td>
+      <td class="num">${c.blankCount ? esc(num(c.blankCount)) : '—'}</td>
+      <td class="num">${esc(num(c.maxLength))}</td>
+      <td class="plan-sample">${esc((c.samples || []).join(' / '))}</td>
+    </tr>`;
+  }).join('');
+
+  refreshNewTableSql();
+}
+
+/** 画面の編集内容を、サーバへ送る形にする。 */
+function collectNewTableColumns() {
+  return $$('#newTableCols tr').map((tr) => {
+    const i = Number(tr.dataset.i);
+    const get = (k) => tr.querySelector(`[data-plan="${k}"]`);
+    const kind = get('kind').value;
+    return {
+      index: i,
+      csvColumn: newTablePlan.columns[i].csvColumn,
+      name: get('name').value.trim(),
+      kind,
+      length:    kind === 'varchar' ? Number(get('length') ? get('length').value : 255) : null,
+      precision: kind === 'decimal' ? Number(get('precision') ? get('precision').value : 18) : null,
+      scale:     kind === 'decimal' ? Number(get('scale') ? get('scale').value : 2) : null,
+      nullable:  get('nullable').checked,
+      primaryKey: get('primaryKey').checked,
+      skip: get('skip').checked,
+    };
+  });
+}
+
+/** 編集のたびに CREATE 文を組み立て直して見せる。 */
+async function refreshNewTableSql() {
+  if (!newTablePlan) return;
+  const msg = $('#newTableMessage');
+  const table = $('#newTableName').value.trim();
+  const cols = collectNewTableColumns();
+  const body = {
+    schema: state.sel.schema,
+    table,
+    columns: cols,
+    surrogateKey: $('#newTableSurrogate').checked ? 'id' : '',
+    preview: true,
+  };
+  try {
+    const r = await api(dbPath(state.sel.serverId, 'create-table/preview',
+      { database: state.sel.database }), { method: 'POST', body });
+    $('#newTableSql').textContent = r.sql;
+    msg.className = 'form-message';
+    msg.textContent = r.exists ? '同じ名前のテーブルが既にあります。別の名前にしてください。' : '';
+    if (r.exists) msg.className = 'form-message err';
+    $('#btnNewTableCreate').disabled = r.exists || !canWrite(state.sel.serverId);
+  } catch (err) {
+    $('#newTableSql').textContent = '';
+    msg.className = 'form-message err';
+    msg.textContent = err.message;
+    $('#btnNewTableCreate').disabled = true;
+  }
+}
+
+// 型を変えると桁の欄も入れ替える必要があるので、描き直しを挟む
+$('#newTableCols').addEventListener('change', (ev) => {
+  const tr = ev.target.closest('tr');
+  if (!tr) return;
+  if (ev.target.dataset.plan === 'kind') {
+    const i = Number(tr.dataset.i);
+    const cols = collectNewTableColumns();
+    // 編集内容を保ったまま、型に合う桁の欄へ差し替える
+    newTablePlan.columns = newTablePlan.columns.map((c, k) => ({ ...c, ...cols[k] }));
+    renderNewTable(newTablePlan);
+    return;
+  }
+  refreshNewTableSql();
+});
+$('#newTableCols').addEventListener('input', debounceSql);
+$('#newTableName').addEventListener('input', debounceSql);
+$('#newTableSurrogate').addEventListener('change', refreshNewTableSql);
+
+let sqlTimer = null;
+function debounceSql() {
+  clearTimeout(sqlTimer);
+  sqlTimer = setTimeout(refreshNewTableSql, 350);
+}
+
+$('#btnNewTableCreate').addEventListener('click', () => {
+  if (!newTablePlan) return;
+  const table = $('#newTableName').value.trim();
+  const cols = collectNewTableColumns().filter((c) => !c.skip);
+  const sk = $('#newTableSurrogate').checked ? 'id' : '';
+  const { serverId, database, schema } = state.sel;
+
+  openConfirm({
+    title: 'テーブルを作る',
+    body: `<div class="notice">${esc(schema)}.<strong>${esc(table)}</strong> を
+      ${cols.length} 列${sk ? '（＋自動採番の id）' : ''}で作ります。</div>
+      <div class="notice">この操作は既存のデータを変更しません。作ったあと、
+      「取り込み」タブから同じ CSV を入れられます。</div>`,
+    sql: $('#newTableSql').textContent,
+    run: () => api(dbPath(serverId, 'create-table', { database }),
+      { method: 'POST', body: { schema, table, columns: cols, surrogateKey: sk } }),
+    done: 'テーブルを作りました',
+    cuiHint: `\\tables`,
+    // 作ったあとはツリーを開き直して、新しいテーブルが見えるようにする
+    after: async () => {
+      const key = nodeKey('sch', serverId, database, schema);
+      if (state.open[key]) await toggleSchema(serverId, database, schema, true);
+      resetNewTablePanel();
+      $('#newTableFile').value = '';
+    },
+  });
 });
 
 /* ---------- 取り込み ---------- */

@@ -22,6 +22,7 @@ require __DIR__ . '/lib/driver_pgsql.php';
 require __DIR__ . '/lib/write.php';
 require __DIR__ . '/lib/csv.php';
 require __DIR__ . '/lib/csv_routes.php';
+require __DIR__ . '/lib/schema_infer.php';
 require __DIR__ . '/lib/theme.php';
 
 mb_internal_encoding('UTF-8');
@@ -519,6 +520,78 @@ function route_db(string $method, array $seg): void
             'sql' => 'CSV 取り込み (' . implode(', ', $result['columns']) . ')',
         ]);
         json_out(['ok' => true] + $result);
+    }
+
+    /* ---- CSV からテーブル構成を読み取る（DB は変更しない）---- */
+    if ($head === 'infer' && $method === 'POST') {
+        $bytes = raw_in();
+        if ($bytes === '') json_out(['error' => 'CSV が空です。'], 400);
+
+        $plan = csv_infer_schema($bytes, [
+            'encoding'  => (string)($_GET['encoding'] ?? ''),
+            'delimiter' => ($_GET['delimiter'] ?? '') === 'tab' ? "\t" : (string)($_GET['delimiter'] ?? ''),
+            'filename'  => (string)($_GET['filename'] ?? ''),
+        ]);
+
+        // 読み取った構成から、その DB での CREATE 文を組み立てて見せる。
+        // 型名は DB ごとに違うので、ここで初めて確定する。
+        $drv = DbDriver::open($conn, $database);
+        $schema = (string)($_GET['schema'] ?? '');
+        $plan['schema'] = $schema;
+        if ($schema !== '' && $plan['tableName'] !== '') {
+            $cols = $drv->assertColumnPlan($plan['columns']);
+            $plan['sql'] = $drv->buildCreateTable(
+                $schema, $plan['tableName'], $cols,
+                $plan['addSurrogateKey'] ? 'id' : ''
+            );
+            $plan['exists'] = $drv->tableExists($schema, $plan['tableName']);
+        }
+        // 型名を画面にも出せるよう、区分ごとの表記を添える
+        foreach ($plan['columns'] as $i => $c) {
+            $plan['columns'][$i]['sqlType'] = $drv->sqlType($c);
+        }
+        json_out($plan);
+    }
+
+    /* ---- 作る前の下見。SQL を組み立てるだけで DB は変更しない ---- */
+    if ($head === 'create-table' && ($rest[1] ?? '') === 'preview' && $method === 'POST') {
+        $in = json_in();
+        $drv = DbDriver::open($conn, $database);
+        $schema = $drv->assertIdentifier((string)pick($in, 'schema', ''), 'スキーマ名');
+        $table  = $drv->assertIdentifier((string)pick($in, 'table', ''), 'テーブル名');
+        $cols   = $drv->assertColumnPlan((array)pick($in, 'columns', []));
+        $sk     = trim((string)pick($in, 'surrogateKey', ''));
+
+        json_out([
+            'sql'    => $drv->buildCreateTable($schema, $table, $cols, $sk),
+            'exists' => $drv->tableExists($schema, $table),
+            'columns'=> count($cols),
+        ]);
+    }
+
+    /* ---- 読み取った構成でテーブルを作る ---- */
+    if ($head === 'create-table' && count($rest) === 1 && $method === 'POST') {
+        if (!has_role($user, 'operator')) {
+            json_out(['error' => 'この操作には「運用者」以上の権限が必要です。'], 403);
+        }
+        assert_writable($conn);
+
+        $in = json_in();
+        $drv = DbDriver::open($conn, $database);
+        $schema = $drv->assertIdentifier((string)pick($in, 'schema', ''), 'スキーマ名');
+        $table  = $drv->assertIdentifier((string)pick($in, 'table', ''), 'テーブル名');
+        $cols   = $drv->assertColumnPlan((array)pick($in, 'columns', []));
+        $sk     = trim((string)pick($in, 'surrogateKey', ''));
+
+        $sql = $drv->createTable($schema, $table, $cols, $sk);
+        audit([
+            'action' => 'create-table', 'user' => $user['username'],
+            'connection' => $conn['name'], 'type' => $conn['type'],
+            'database' => $database, 'target' => "{$schema}.{$table}",
+            'sql' => $sql,
+        ]);
+        json_out(['ok' => true, 'schema' => $schema, 'table' => $table,
+                  'columns' => count($cols), 'sql' => $sql]);
     }
 
     // 自由入力の更新系 SQL。PHP 版では意図的に用意していない。

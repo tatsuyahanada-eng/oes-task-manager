@@ -89,6 +89,26 @@ class PgsqlDriver extends DbDriver
         return '"' . str_replace('"', '""', $name) . '"';
     }
 
+    /** 読み取った型の区分を PostgreSQL の型名に直す。 */
+    public function sqlType(array $col): string
+    {
+        switch ($col['kind']) {
+            case 'int':      return 'INTEGER';
+            case 'bigint':   return 'BIGINT';
+            case 'decimal':  return "NUMERIC({$col['precision']},{$col['scale']})";
+            case 'bool':     return 'BOOLEAN';
+            case 'date':     return 'DATE';
+            case 'datetime': return 'TIMESTAMP';
+            case 'varchar':  return "VARCHAR({$col['length']})";
+            default:         return 'TEXT';
+        }
+    }
+
+    public function surrogateKeySql(string $name): string
+    {
+        return $this->quote($name) . ' BIGINT GENERATED ALWAYS AS IDENTITY';
+    }
+
     public function serverInfo(): array
     {
         $row = $this->one(
