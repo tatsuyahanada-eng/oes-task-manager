@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 64" role="img" aria-label="WELSYS">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 266 64" role="img" aria-label="WELSYS">
   <defs>
     <linearGradient id="wl-ring" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0%"   stop-color="#5fe3c0"/>
@@ -22,5 +22,4 @@
         font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
         font-size="38" font-weight="800" letter-spacing="2.5"
         fill="#ffffff">WELSYS</text>
-  <circle cx="252" cy="41" r="5" fill="#3b82f6"/>
 </svg>

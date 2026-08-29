@@ -841,6 +841,12 @@ input[type=file]::file-selector-button {
 }
 
 .login-brand { text-align: center; margin-bottom: 24px; }
+.login-appicon {
+  display: block;
+  width: 64px; height: 64px; border-radius: 16px;
+  margin: 0 auto 16px;
+  box-shadow: 0 10px 26px rgba(0, 0, 0, .35);
+}
 .login-logo { height: 30px; width: auto; margin-bottom: 14px; }
 .login-brand h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: .01em; }
 .login-sub { margin: 5px 0 0; font-size: 12px; color: var(--text-dim); }
