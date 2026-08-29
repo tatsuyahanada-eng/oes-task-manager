@@ -5,12 +5,13 @@
  * ========================================================== */
 
 :root {
-  --bg: #0d1117;
-  --bg-panel: #12171f;
-  --bg-raise: #1a212b;
-  --bg-hover: #232c38;
-  --border: #262e3a;
-  --border-strong: #38424f;
+  /* ねずみ色（ニュートラルな灰色）を基調にした背景。青みを持たせない。 */
+  --bg: #303134;
+  --bg-panel: #38393d;
+  --bg-raise: #434448;
+  --bg-hover: #505155;
+  --border: #45464a;
+  --border-strong: #5a5b60;
 
   --text: #e9eef5;
   --text-mute: #8d9aab;
@@ -816,7 +817,7 @@ input[type=file]::file-selector-button {
 .login-body {
   display: block;
   background:
-    radial-gradient(1100px 520px at 50% -10%, #16202e 0%, transparent 62%),
+    radial-gradient(1100px 520px at 50% -10%, var(--bg-hover) 0%, transparent 62%),
     var(--bg);
   min-height: 100dvh;
 }
