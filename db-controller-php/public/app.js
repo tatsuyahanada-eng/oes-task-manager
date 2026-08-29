@@ -1963,6 +1963,10 @@ $('#btnCsv').addEventListener('click', async () => {
   $('#csvPreview').innerHTML = '';
   $('#csvImportMessage').textContent = '';
   $('#btnCsvImport').disabled = true;
+  // お試しは本番を変えないので、読み取り専用でも押せる。ファイルを選んだ時点で有効になる。
+  $('#csvTrial').hidden = true;
+  $('#btnCsvTrial').disabled = true;
+  $('#csvFile').value = '';
   csvPreviewData = null;
 
   // 開き直すたびに「出力」から始めるので、幅も既定へ戻す
@@ -1979,8 +1983,9 @@ $('#btnCloseCsv').addEventListener('click', () => { $('#csvModal').hidden = true
 $$('#csvTabs .seg-btn').forEach((b) => b.addEventListener('click', () => {
   $$('#csvTabs .seg-btn').forEach((x) => x.classList.toggle('is-active', x === b));
   $$('.csv-panel').forEach((p) => p.classList.toggle('is-active', p.dataset.csvPanel === b.dataset.csv));
-  // 構成の一覧は列が多いので、その画面のときだけシートを広げる
-  $('#csvModal .sheet').classList.toggle('sheet-wide', b.dataset.csv === 'newtable');
+  // 構成の一覧やお試しの結果は列が多いので、その画面のときだけシートを広げる
+  $('#csvModal .sheet').classList.toggle('sheet-wide',
+    b.dataset.csv === 'newtable' || b.dataset.csv === 'import');
 }));
 
 /** 出力用のクエリ文字列を組み立てる。 */
@@ -2084,6 +2089,8 @@ const PLAN_KINDS = [
 function resetNewTablePanel() {
   newTablePlan = null;
   $('#newTableResult').hidden = true;
+  $('#newTableTrial').hidden = true;
+  $('#btnNewTableTrial').disabled = true;
   $('#newTableMessage').textContent = '';
   $('#newTableMessage').className = 'form-message';
   $('#btnNewTableCreate').disabled = true;
@@ -2114,6 +2121,7 @@ $('#btnNewTableRead').addEventListener('click', async () => {
     const plan = await postCsv(`/api/db/${serverId}/infer?${q}`, buffer);
     newTablePlan = plan;
     renderNewTable(plan);
+    $('#btnNewTableTrial').disabled = false;
     msg.textContent = '';
 
     echoGui(
@@ -2133,6 +2141,8 @@ function renderNewTable(plan) {
   $('#newTableName').value = plan.tableName;
   $('#newTableRows').value = `${num(plan.rowCount)} 行`;
   $('#newTableSurrogate').checked = Boolean(plan.addSurrogateKey);
+  // CSV に id 列があると使えないので、名前はサーバが決めたものに従う
+  $('#newTableSkName').textContent = plan.surrogateKeyName || 'id';
 
   $('#newTableNotes').innerHTML = (plan.notes || [])
     .map((n) => `<div class="notice warn">${esc(n)}</div>`).join('');
@@ -2163,6 +2173,11 @@ function renderNewTable(plan) {
   }).join('');
 
   refreshNewTableSql();
+}
+
+/** 自動採番の列名。CSV に id があるときはサーバがずらした名前を使う。 */
+function surrogateName() {
+  return (newTablePlan && newTablePlan.surrogateKeyName) || 'id';
 }
 
 /** 画面の編集内容を、サーバへ送る形にする。 */
@@ -2196,7 +2211,7 @@ async function refreshNewTableSql() {
     schema: state.sel.schema,
     table,
     columns: cols,
-    surrogateKey: $('#newTableSurrogate').checked ? 'id' : '',
+    surrogateKey: $('#newTableSurrogate').checked ? surrogateName() : '',
     preview: true,
   };
   try {
@@ -2243,13 +2258,13 @@ $('#btnNewTableCreate').addEventListener('click', () => {
   if (!newTablePlan) return;
   const table = $('#newTableName').value.trim();
   const cols = collectNewTableColumns().filter((c) => !c.skip);
-  const sk = $('#newTableSurrogate').checked ? 'id' : '';
+  const sk = $('#newTableSurrogate').checked ? surrogateName() : '';
   const { serverId, database, schema } = state.sel;
 
   openConfirm({
     title: 'テーブルを作る',
     body: `<div class="notice">${esc(schema)}.<strong>${esc(table)}</strong> を
-      ${cols.length} 列${sk ? '（＋自動採番の id）' : ''}で作ります。</div>
+      ${cols.length} 列${sk ? `（＋自動採番の ${esc(sk)}）` : ''}で作ります。</div>
       <div class="notice">この操作は既存のデータを変更しません。作ったあと、
       「取り込み」タブから同じ CSV を入れられます。</div>`,
     sql: $('#newTableSql').textContent,
@@ -2350,6 +2365,9 @@ $('#csvFile').addEventListener('change', () => {
   $('#csvPreview').innerHTML = '';
   $('#csvImportMessage').textContent = '';
   $('#btnCsvImport').disabled = true;
+  $('#csvTrial').hidden = true;
+  // お試しは本番を変えないので、テーブルさえ選んであれば押せる
+  $('#btnCsvTrial').disabled = !state.sel.table || !$('#csvFile').files[0];
   csvPreviewData = null;
 });
 
@@ -2374,6 +2392,166 @@ $('#btnCsvImport').addEventListener('click', () => {
     done: 'CSV を取り込みました',
     cuiHint: `INSERT INTO ${p.schema}.${p.table} (${p.matchedColumns.join(', ')}) VALUES (...);`
            + ` × ${p.totalRows} 行`,
+  });
+});
+
+/* ============================================================
+ * お試し取り込み
+ *
+ * 本番のテーブルには触れず、DB の「一時テーブル」に入れて試す。
+ * 一時テーブルはこの接続からしか見えず、終われば自動的に消えるので、
+ * 読み取り専用の接続でも安全に試せる。
+ *
+ * 本番の取り込みと違い、途中で止めずに最後まで試して、
+ * 通らなかった行を全部集めて見せる。直す箇所が一度で分かるように。
+ * ========================================================== */
+
+/** 送るものが多いので multipart で送る。列の指定は URL に載りきらないことがある。 */
+async function postTrial(serverId, database, plan, file) {
+  const fd = new FormData();
+  fd.append('plan', JSON.stringify(plan));
+  fd.append('file', file, file.name);
+
+  const q = new URLSearchParams();
+  if (database) q.set('database', database);
+
+  const res = await fetch(url(`/api/db/${serverId}/trial-import?${q}`), {
+    method: 'POST',
+    credentials: 'same-origin',
+    body: fd,
+  });
+  if (res.status === 401) { location.replace(BASE + '/login.html'); throw new Error('ログインが必要です。'); }
+  const text = await res.text();
+  let payload = {};
+  if (text) { try { payload = JSON.parse(text); } catch { throw new Error(`応答を解釈できません (HTTP ${res.status})`); } }
+  if (!res.ok) throw new Error(payload.error || `HTTP ${res.status}`);
+  return payload;
+}
+
+/** 書式の指定は、上の共通欄から拾う。 */
+function trialFormat() {
+  const out = {};
+  const enc = $('#csvEncoding').value;
+  const del = $('#csvDelimiter').value;
+  if (enc && enc !== 'auto') out.encoding = enc;
+  if (del && del !== 'auto') out.delimiter = del;
+  return out;
+}
+
+/** お試しの結果を描く。テーブル作成・取り込みの両方から使う。 */
+function renderTrial(box, r) {
+  const ok = r.failed === 0;
+  const head = ok
+    ? `<div class="trial-head is-ok">そのまま取り込めます
+         <span class="trial-count">${num(r.inserted)} 行すべて成功</span></div>`
+    : `<div class="trial-head is-ng">${num(r.failed)} 行が取り込めません
+         <span class="trial-count">成功 ${num(r.inserted)} 行 / 試した ${num(r.tried)} 行</span></div>`;
+
+  const errs = r.errors.length ? `
+    <p class="section-label">通らなかった行</p>
+    <div class="grid-wrap trial-errors">
+      <table class="grid">
+        <thead><tr><th>行</th><th>理由</th><th>元のメッセージ</th></tr></thead>
+        <tbody>${r.errors.map((e) => `<tr>
+          <td class="num">${num(e.line)}</td>
+          <td>${esc(e.message)}</td>
+          <td class="trial-raw">${esc(e.raw)}</td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>
+    ${r.failed > r.errorsShown
+      ? `<p class="muted">ほかに ${num(r.failed - r.errorsShown)} 行あります。表示は ${num(r.errorsShown)} 行までです。</p>`
+      : ''}` : '';
+
+  const ignored = (r.ignoredColumns || []).length
+    ? `<div class="csv-warn">CSV にあって取り込まれない列: ${esc(r.ignoredColumns.join(', '))}</div>` : '';
+
+  const sample = (r.sample || []).length ? `
+    <p class="section-label">入った中身（先頭 ${num(r.sample.length)} 行）</p>
+    <div class="grid-wrap trial-sample">
+      <table class="grid">
+        <thead><tr>${r.columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
+        <tbody>${r.sample.map((row) => `<tr>${row.map((v) =>
+          (v === null ? '<td class="null">NULL</td>' : `<td>${esc(v)}</td>`)).join('')}</tr>`).join('')}</tbody>
+      </table>
+    </div>` : '';
+
+  box.hidden = false;
+  box.innerHTML = `${head}
+    <div class="notice">この結果は<strong>使い捨てのテーブル</strong>で試したものです。
+      本番のテーブルは何も変わっていません。</div>
+    ${ignored}${errs}${sample}
+    <p class="section-label">試したときの SQL</p>
+    <pre class="sql-block">${esc(r.createSql)};\n\n${esc(r.sql)}</pre>`;
+}
+
+/** 実行の共通部分。ボタン・メッセージ欄・結果欄をまとめて面倒みる。 */
+async function runTrial({ btn, box, msg, file, plan, label }) {
+  msg.className = 'form-message';
+  if (!file) { msg.className = 'form-message err'; msg.textContent = 'CSV ファイルを選んでください。'; return; }
+  if (!state.sel.schema) { msg.className = 'form-message err'; msg.textContent = 'ツリーでスキーマを選んでください。'; return; }
+
+  const { serverId, database } = state.sel;
+  btn.disabled = true;
+  msg.textContent = '試しています…';
+  box.hidden = true;
+  try {
+    const r = await postTrial(serverId, database, plan, file);
+    renderTrial(box, r);
+    msg.textContent = '';
+    toast(r.failed === 0 ? 'お試し取り込み: そのまま取り込めます'
+                         : `お試し取り込み: ${num(r.failed)} 行が取り込めません`,
+          r.failed === 0 ? 'ok' : 'warn');
+    echoGui(
+      `${label} をお試し取り込み（成功 ${num(r.inserted)} 行 / 失敗 ${num(r.failed)} 行・本番は未変更）`,
+      `${r.createSql};\n${r.sql}`,
+      null
+    );
+  } catch (err) {
+    box.hidden = true;
+    msg.className = 'form-message err';
+    msg.textContent = err.message;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 読み取った構成のまま、作る前に試す
+$('#btnNewTableTrial').addEventListener('click', () => {
+  if (!newTablePlan) return;
+  runTrial({
+    btn: $('#btnNewTableTrial'),
+    box: $('#newTableTrial'),
+    msg: $('#newTableMessage'),
+    file: $('#newTableFile').files[0],
+    label: $('#newTableName').value.trim() || '新しいテーブル',
+    plan: {
+      mode: 'plan',
+      schema: state.sel.schema,
+      table: $('#newTableName').value.trim(),
+      columns: collectNewTableColumns().filter((c) => !c.skip),
+      surrogateKey: $('#newTableSurrogate').checked ? surrogateName() : '',
+      ...trialFormat(),
+    },
+  });
+});
+
+// いま選んでいるテーブルと同じ構造で試す
+$('#btnCsvTrial').addEventListener('click', () => {
+  if (!state.sel.table) return;
+  runTrial({
+    btn: $('#btnCsvTrial'),
+    box: $('#csvTrial'),
+    msg: $('#csvImportMessage'),
+    file: $('#csvFile').files[0],
+    label: `${state.sel.schema}.${state.sel.table.name}`,
+    plan: {
+      mode: 'existing',
+      schema: state.sel.schema,
+      table: state.sel.table.name,
+      emptyAsNull: $('#csvEmptyAsNull').checked ? 'true' : 'false',
+      ...trialFormat(),
+    },
   });
 });
 

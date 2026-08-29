@@ -23,6 +23,7 @@ require __DIR__ . '/lib/write.php';
 require __DIR__ . '/lib/csv.php';
 require __DIR__ . '/lib/csv_routes.php';
 require __DIR__ . '/lib/schema_infer.php';
+require __DIR__ . '/lib/csv_trial.php';
 require __DIR__ . '/lib/theme.php';
 
 mb_internal_encoding('UTF-8');
@@ -544,7 +545,7 @@ function route_db(string $method, array $seg): void
             $cols = $drv->assertColumnPlan($plan['columns']);
             $plan['sql'] = $drv->buildCreateTable(
                 $schema, $plan['tableName'], $cols,
-                $plan['addSurrogateKey'] ? 'id' : ''
+                $plan['addSurrogateKey'] ? $plan['surrogateKeyName'] : ''
             );
             $plan['exists'] = $drv->tableExists($schema, $plan['tableName']);
         }
@@ -553,6 +554,78 @@ function route_db(string $method, array $seg): void
             $plan['columns'][$i]['sqlType'] = $drv->sqlType($c);
         }
         json_out($plan);
+    }
+
+    /* ---- お試し取り込み ----
+     *
+     * 一時テーブルに入れて試すだけ。本番のテーブルには一切触れないので、
+     * 読み取り専用の接続でも通す（一時テーブルは接続が切れれば消える）。
+     *
+     * mode=plan     … CSV から読み取った構成で、新しく作る想定を試す
+     * mode=existing … 既にあるテーブルと同じ構造を写して試す
+     */
+    if ($head === 'trial-import' && $method === 'POST') {
+        // 列の指定は数が多いと URL に載りきらないので、multipart でも受け取れるようにする。
+        // multipart のときは plan（JSON）と file（CSV）の 2 つに分けて送る。
+        $form = [];
+        if (isset($_POST['plan'])) {
+            $decoded = json_decode((string)$_POST['plan'], true);
+            if (is_array($decoded)) $form = $decoded;
+        }
+        $param = function (string $key, $default = '') use ($form) {
+            return array_key_exists($key, $form) ? $form[$key] : ($_GET[$key] ?? $default);
+        };
+
+        $drv = DbDriver::open($conn, $database);
+        $schema = $drv->assertIdentifier((string)$param('schema'), 'スキーマ名');
+        $mode = (string)$param('mode', 'plan');
+        $delimiter = (string)$param('delimiter');
+        $opts = [
+            'encoding'    => (string)$param('encoding'),
+            'delimiter'   => $delimiter === 'tab' ? "\t" : $delimiter,
+            'emptyAsNull' => $param('emptyAsNull', 'true') !== 'false' && $param('emptyAsNull', 'true') !== false,
+        ];
+
+        $bytes = (isset($_FILES['file']) && is_uploaded_file((string)$_FILES['file']['tmp_name']))
+            ? (string)file_get_contents((string)$_FILES['file']['tmp_name'])
+            : raw_in();
+        if ($bytes === '') json_out(['error' => 'CSV が空です。'], 400);
+
+        $temp = csv_trial_table_name();
+
+        if ($mode === 'existing') {
+            $table = $drv->assertIdentifier((string)$param('table'), 'テーブル名');
+            $detail = $drv->describeTable($schema, $table);
+            if ($detail['type'] !== 'TABLE') json_out(['error' => 'ビューには取り込めません。'], 400);
+            $createSql = $drv->createTrialTableLike($schema, $table, $temp);
+            $columns = array_map(fn($c) => [
+                'name' => $c['name'], 'nullable' => $c['nullable'], 'dataType' => $c['dataType'],
+            ], $detail['columns']);
+            $target = "{$schema}.{$table}";
+        } else {
+            $planned = $param('columns');
+            if (is_string($planned)) $planned = json_decode($planned, true);
+            if (!is_array($planned)) json_out(['error' => '列の指定がありません。'], 400);
+            $cols = $drv->assertColumnPlan($planned);
+            $sk = trim((string)$param('surrogateKey'));
+            $createSql = $drv->createTrialTable($schema, $temp, $cols, $sk);
+            $columns = array_map(fn($c) => [
+                'name' => $c['name'], 'nullable' => $c['nullable'],
+                'dataType' => $drv->sqlType($c),
+            ], $cols);
+            $target = (string)$param('table', '(新しいテーブル)');
+        }
+
+        $result = csv_trial_import($drv, $temp, $columns, $bytes, $opts);
+        // 記録は残すが、本番は変えていないことが分かる書き方にする
+        audit([
+            'action' => 'trial-import', 'user' => $user['username'],
+            'connection' => $conn['name'], 'type' => $conn['type'],
+            'database' => $database, 'target' => $target,
+            'affected' => $result['inserted'],
+            'sql' => 'お試し取り込み（一時テーブル。本番は変更していません）',
+        ]);
+        json_out(['mode' => $mode, 'target' => $target, 'createSql' => $createSql] + $result);
     }
 
     /* ---- 作る前の下見。SQL を組み立てるだけで DB は変更しない ---- */

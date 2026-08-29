@@ -167,6 +167,19 @@ class MysqlDriver extends DbDriver
         return $this->quote($name) . ' BIGINT NOT NULL AUTO_INCREMENT';
     }
 
+    public function createTrialTableLike(string $schema, string $table, string $tempName): string
+    {
+        $this->assertIdentifier($tempName, 'お試し用のテーブル名');
+        $sql = 'CREATE TEMPORARY TABLE ' . $this->quote($tempName)
+             . ' LIKE ' . $this->qualify($schema, $table);
+        try {
+            $this->pdo->exec($sql);
+        } catch (PDOException $e) {
+            throw bad('お試し用のテーブルを作れませんでした: ' . $e->getMessage(), 502);
+        }
+        return $sql;
+    }
+
     /**
      * MySQL の非バッファ問い合わせで、1 行ずつ受け取る。
      *

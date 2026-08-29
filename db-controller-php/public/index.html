@@ -512,7 +512,7 @@
 
         <label class="check">
           <input type="checkbox" id="newTableSurrogate">
-          自動採番の主キー列 <code>id</code> を先頭に足す
+          自動採番の主キー列 <code id="newTableSkName">id</code> を先頭に足す
         </label>
 
         <p class="section-label">読み取ったテーブル構成</p>
@@ -532,12 +532,21 @@
 
         <p class="section-label">実行される SQL</p>
         <pre class="sql-block" id="newTableSql"></pre>
+
+        <div class="notice">
+          <strong>お試し取り込み</strong>は、この構成の<strong>使い捨てのテーブル</strong>を作って
+          CSV を入れてみます。本番のテーブルは作りませんし、変更もしません。
+          使い捨てのテーブルは終わると自動的に消えます。
+          読み取り専用の接続でも試せます。
+        </div>
+        <div class="trial-box" id="newTableTrial" hidden></div>
       </div>
 
       <p class="form-message" id="newTableMessage"></p>
       <div class="sheet-actions">
         <span class="spacer"></span>
         <button type="button" class="btn" id="btnNewTableRead">構成を読み取る</button>
+        <button type="button" class="btn btn-trial" id="btnNewTableTrial" disabled>お試し取り込み</button>
         <button type="button" class="btn btn-write" id="btnNewTableCreate" disabled>テーブルを作る</button>
       </div>
     </section>
@@ -559,10 +568,17 @@
       </label>
       <p class="muted">文字コードと区切り文字は「自動」で判定します（上で明示も可能）。</p>
       <div id="csvPreview"></div>
+      <div class="notice">
+        <strong>お試し取り込み</strong>は、このテーブルと<strong>同じ構造の使い捨てのテーブル</strong>を作って
+        そちらに入れてみます。本番のテーブルは変更しません。
+        通らない行があれば、行番号と理由を全部出します。
+      </div>
+      <div class="trial-box" id="csvTrial" hidden></div>
       <p class="form-message" id="csvImportMessage"></p>
       <div class="sheet-actions">
         <span class="spacer"></span>
         <button type="button" class="btn" id="btnCsvPreview">内容を確認</button>
+        <button type="button" class="btn btn-trial" id="btnCsvTrial" disabled>お試し取り込み</button>
         <button type="button" class="btn btn-write" id="btnCsvImport" disabled>取り込む</button>
       </div>
     </section>

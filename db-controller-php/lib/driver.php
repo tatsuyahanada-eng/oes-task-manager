@@ -349,7 +349,7 @@ abstract class DbDriver
      * 識別子は必ず quote() を通し、型は決められた区分からしか作らない。
      */
     public function buildCreateTable(string $schema, string $table, array $columns,
-                                     string $surrogateKey = ''): string
+                                     string $surrogateKey = '', bool $temporary = false): string
     {
         $this->assertIdentifier($schema, 'スキーマ名');
         $this->assertIdentifier($table, 'テーブル名');
@@ -378,9 +378,67 @@ abstract class DbDriver
 
         if ($pk) $lines[] = '  PRIMARY KEY (' . implode(', ', $pk) . ')';
 
-        return 'CREATE TABLE ' . $this->qualify($schema, $table) . " (\n"
-             . implode(",\n", $lines) . "\n)";
+        // お試し用の一時テーブルは、接続を切った時点で自動的に消える。
+        // スキーマ名は付けない（一時テーブルは接続専用の置き場に作られるため）。
+        $head = $temporary
+            ? 'CREATE TEMPORARY TABLE ' . $this->quote($table)
+            : 'CREATE TABLE ' . $this->qualify($schema, $table);
+
+        return $head . " (\n" . implode(",\n", $lines) . "\n)";
     }
+
+    /**
+     * お試し用の一時テーブルを作る。
+     *
+     * 一時テーブルは、その接続からしか見えず、接続が切れると自動的に消える。
+     * PHP はリクエストごとに接続を閉じるので、この 1 回の操作が終われば
+     * 何も残らない。本番のデータに一切触れずに取り込みを試せる。
+     */
+    public function createTrialTable(string $schema, string $table, array $columns,
+                                     string $surrogateKey = ''): string
+    {
+        $sql = $this->buildCreateTable($schema, $table, $columns, $surrogateKey, true);
+        try {
+            $this->pdo->exec($sql);
+        } catch (PDOException $e) {
+            throw bad('お試し用のテーブルを作れませんでした: ' . $e->getMessage()
+                    . "\n" . self::trialCreateHint($e->getMessage()), 502);
+        }
+        return $sql;
+    }
+
+    /**
+     * 一時テーブルを作れなかった理由を、直し方の分かる言い方にする。
+     *
+     * ここで出る失敗は、本番の CREATE TABLE でも同じように出るものがほとんど。
+     * つまり「作る前に気づけた」ということなので、その旨も伝える。
+     */
+    protected static function trialCreateHint(string $message): string
+    {
+        if (stripos($message, 'Row size too large') !== false
+            || stripos($message, 'row size') !== false) {
+            return '1 行に入る大きさの上限を超えています。文字列の桁を減らすか、'
+                 . '長い列を「長い文字列」にしてください。'
+                 . '（この構成では本番のテーブルも作れません）';
+        }
+        if (stripos($message, 'Too many columns') !== false) {
+            return '列が多すぎます。列を減らしてください。'
+                 . '（この構成では本番のテーブルも作れません）';
+        }
+        if (stripos($message, 'denied') !== false || stripos($message, 'permission') !== false
+            || stripos($message, 'privilege') !== false) {
+            return 'DB の利用者に、一時テーブルを作る権限（CREATE TEMPORARY TABLES）が'
+                 . '与えられていない可能性があります。';
+        }
+        return '構成に無理がないか確かめてください。'
+             . '（お試しなので、本番のテーブルは何も変わっていません）';
+    }
+
+    /**
+     * 既にあるテーブルと同じ構造の一時テーブルを作る。
+     * 「この CSV を本番のテーブルに入れたらどうなるか」を、触らずに試すため。
+     */
+    abstract public function createTrialTableLike(string $schema, string $table, string $tempName): string;
 
     /** 同じ名前のテーブルが既にあるか。 */
     public function tableExists(string $schema, string $table): bool

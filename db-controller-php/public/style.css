@@ -583,6 +583,10 @@ select option { background: var(--bg-raise); color: var(--text); }
 .btn-write { color: #17111f; background: var(--write); border-color: var(--write); font-weight: 700; }
 .btn-write:hover:not(:disabled) { background: #e0c0ff; }
 
+/* お試しは本番を変えないので、更新のボタンとは色を分ける */
+.btn-trial { color: var(--ok); border-color: var(--ok); }
+.btn-trial:hover:not(:disabled) { background: rgba(95, 227, 192, .12); }
+
 /* ---------- シート（モーダル）---------- */
 .sheet-backdrop {
   position: fixed;
@@ -990,3 +994,39 @@ input[type=file]::file-selector-button {
 .guide-example { font-family: var(--mono); color: var(--ok); word-break: break-all; }
 .guide-note-row td { padding-top: 0; padding-bottom: 5px; }
 .guide-note { color: var(--warn); font-size: 11px; }
+
+
+/* ---------- お試し取り込みの結果 ---------- */
+.trial-box {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raise);
+}
+.trial-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 10px;
+}
+.trial-head.is-ok { color: var(--ok); }
+.trial-head.is-ng { color: var(--danger); }
+.trial-count { font-size: 11px; font-weight: 400; color: var(--text-mute); }
+
+.trial-errors, .trial-sample { max-height: 30vh; border: 1px solid var(--border); border-radius: 6px; }
+.trial-errors td { vertical-align: top; }
+.trial-raw {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-mute);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-width: 34em;
+}
+.trial-box .sql-block { margin-top: 4px; }

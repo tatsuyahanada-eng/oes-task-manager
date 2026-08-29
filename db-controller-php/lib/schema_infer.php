@@ -406,7 +406,29 @@ function csv_infer_schema(string $bytes, array $opts): array
         'columnCount'      => $colCount,
         'columns'          => $columns,
         'addSurrogateKey'  => !$hasPk,
+        'surrogateKeyName' => infer_surrogate_name($columns),
         'ragged'           => $ragged,
         'notes'            => $notes,
     ];
+}
+
+/**
+ * 自動採番の列につける名前を決める。
+ *
+ * ふつうは id。ただし CSV に同じ名前の列があると作れないので、
+ * その時は重ならない名前にずらす。
+ * （Oracle から来た CSV は、一意でない id 列を持っていることがよくある）
+ */
+function infer_surrogate_name(array $columns): string
+{
+    $used = [];
+    foreach ($columns as $c) $used[strtolower((string)$c['name'])] = true;
+
+    foreach (['id', 'row_id', 'seq_id'] as $name) {
+        if (!isset($used[$name])) return $name;
+    }
+    for ($i = 2; $i < 100; $i++) {
+        if (!isset($used["row_id{$i}"])) return "row_id{$i}";
+    }
+    return 'row_id_' . bin2hex(random_bytes(2));
 }

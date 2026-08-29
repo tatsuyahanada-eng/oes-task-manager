@@ -109,6 +109,20 @@ class PgsqlDriver extends DbDriver
         return $this->quote($name) . ' BIGINT GENERATED ALWAYS AS IDENTITY';
     }
 
+    public function createTrialTableLike(string $schema, string $table, string $tempName): string
+    {
+        $this->assertIdentifier($tempName, 'お試し用のテーブル名');
+        // INCLUDING ALL で、既定値・NOT NULL・主キーまで写す
+        $sql = 'CREATE TEMPORARY TABLE ' . $this->quote($tempName)
+             . ' (LIKE ' . $this->qualify($schema, $table) . ' INCLUDING ALL)';
+        try {
+            $this->pdo->exec($sql);
+        } catch (PDOException $e) {
+            throw bad('お試し用のテーブルを作れませんでした: ' . $e->getMessage(), 502);
+        }
+        return $sql;
+    }
+
     /**
      * サーバ側カーソルで、1 行ずつ受け取る。
      *
