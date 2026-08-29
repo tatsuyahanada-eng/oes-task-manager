@@ -120,6 +120,58 @@ add('サーバ', 'HTTPS', (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'o
         ? 'HTTPS で接続しています'
         : '<strong>HTTP で接続しています。パスワードが平文で流れます</strong>');
 
+/* ---------------- 外部の DB サーバへ届くか ----------------
+ *
+ * このレンタルサーバから、別のサーバ（社内のデータサーバなど）の
+ * DB へ TCP で届くかどうかだけを調べる。
+ * 「ユーザー名やパスワードが違う」のか「そもそも届いていない」のかを
+ * 切り分けるための欄。DB へはログインしないので、認証情報は要らない。
+ */
+
+$probeHost = isset($_GET['host']) ? trim($_GET['host']) : '';
+$probePort = isset($_GET['port']) ? (int)$_GET['port'] : 0;
+
+if ($probeHost !== '') {
+    if (!preg_match('/^[A-Za-z0-9._\-]+$/', $probeHost)) {
+        add('外部サーバへの到達', '入力', 'ng', 'ホスト名の形式が正しくありません。');
+    } elseif ($probePort < 1 || $probePort > 65535) {
+        add('外部サーバへの到達', '入力', 'ng', 'ポートは 1〜65535 で指定してください。');
+    } else {
+        $shown = htmlspecialchars($probeHost . ':' . $probePort, ENT_QUOTES, 'UTF-8');
+
+        // 1. 名前が引けるか
+        $ip = @gethostbyname($probeHost);
+        if ($ip === $probeHost && !filter_var($probeHost, FILTER_VALIDATE_IP)) {
+            add('外部サーバへの到達', '名前の解決', 'ng',
+                '<strong>ホスト名を IP アドレスに変換できませんでした。</strong>'
+                . '綴りを確認してください。社内だけの名前は、ここからは引けないことがあります。');
+        } else {
+            add('外部サーバへの到達', '名前の解決', 'ok',
+                $shown . ' → ' . htmlspecialchars($ip, ENT_QUOTES, 'UTF-8'));
+
+            // 2. その IP のポートまで届くか
+            $t0 = microtime(true);
+            $errno = 0; $errstr = '';
+            $fp = @fsockopen($ip, $probePort, $errno, $errstr, 8);
+            $ms = (int)round((microtime(true) - $t0) * 1000);
+
+            if ($fp) {
+                fclose($fp);
+                add('外部サーバへの到達', 'ポートへの接続', 'ok',
+                    '<strong>届きました</strong>（' . $ms . 'ms）。'
+                    . 'あとは DB 側の利用者・パスワード・接続元の許可を確認してください。');
+            } else {
+                add('外部サーバへの到達', 'ポートへの接続', 'ng',
+                    '<strong>届きませんでした</strong>（' . $ms . 'ms）。'
+                    . htmlspecialchars($errstr . ' [' . $errno . ']', ENT_QUOTES, 'UTF-8')
+                    . '<br>考えられる原因: このレンタルサーバが外への接続を塞いでいる / '
+                    . '相手側のファイアウォールで止まっている / '
+                    . 'DB が外部からの接続を受け付ける設定になっていない');
+            }
+        }
+    }
+}
+
 /* ---------------- 結論 ---------------- */
 
 $fatal = array();
@@ -159,6 +211,15 @@ if (count($fatal) === 0) {
  .v h3{margin:0 0 6px;font-size:15px}
  .d{border:1px solid #ff6b5e;border-radius:7px;padding:12px 16px;margin-top:26px;
     background:#1d1315;color:#ffb3ac;font-size:13.5px}
+ .probe{border:1px solid #232734;border-radius:7px;padding:14px 16px;background:#12151d}
+ .probe p{margin:0 0 12px;font-size:13.5px;color:#c3c9d8}
+ .probe label{display:inline-block;margin:0 14px 8px 0;font-size:12.5px;color:#8a92a6}
+ .probe input{display:block;margin-top:4px;padding:7px 9px;font-size:14px;
+    background:#0d1117;color:#e9eef5;border:1px solid #38424f;border-radius:5px;min-width:230px}
+ .probe input[type=number]{min-width:110px}
+ .probe button{padding:8px 18px;font-size:14px;border-radius:5px;cursor:pointer;
+    background:#1d4a7a;color:#fff;border:1px solid #2f6ea8}
+ .probe .hint{margin:10px 0 0;font-size:12px;color:#8a92a6}
 </style></head><body><div class="w">
 <h1>DB Controller — 設置の自己診断</h1>
 <div class="sub">本体のコードは読み込んでいません。本体が壊れていてもこのページは出ます。</div>
@@ -177,6 +238,25 @@ if (count($fatal) === 0) {
         <td><?php echo $r['detail']; ?></td></tr>
   <?php endforeach; ?></table>
 <?php endforeach; ?>
+
+<h2>外部の DB サーバへ届くか調べる</h2>
+<form method="get" class="probe">
+  <p>
+    このサーバから、別の DB サーバ（社内のデータサーバなど）へ
+    <strong>届くかどうかだけ</strong>を調べます。DB へはログインしないので、
+    ユーザー名やパスワードは要りません。
+  </p>
+  <label>ホスト
+    <input type="text" name="host" placeholder="db.example.local または 192.168.1.20"
+           value="<?php echo htmlspecialchars($probeHost, ENT_QUOTES, 'UTF-8'); ?>">
+  </label>
+  <label>ポート
+    <input type="number" name="port" min="1" max="65535" placeholder="3306"
+           value="<?php echo $probePort > 0 ? (int)$probePort : ''; ?>">
+  </label>
+  <button type="submit">調べる</button>
+  <p class="hint">MySQL は 3306、PostgreSQL は 5432 が既定です。</p>
+</form>
 
 <div class="d"><strong>確認が終わったら、このファイルを削除してください。</strong><br>
 サーバの構成が外から見える状態になります。</div>
