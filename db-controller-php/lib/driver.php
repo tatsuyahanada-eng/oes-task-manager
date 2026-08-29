@@ -208,13 +208,33 @@ abstract class DbDriver
             throw bad('参照系（SELECT / SHOW / DESCRIBE / EXPLAIN）だけ実行できます。');
         }
 
+        // 上限より 1 行だけ多く読む。多く読めたら「まだ続きがある」と分かる。
+        //
+        // 以前は全行を読んでから上限まで切り捨てていた。
+        // 中身の分からない DB で SELECT * FROM 巨大テーブル と打つと、
+        // 捨てるだけの数十万行を丸ごとメモリに読み込んでいた。
+        $rows = [];
+        $columns = [];
+        $started = microtime(true);
         try {
-            $grid = $this->fetchGrid($this->pdo->query($s));
+            $this->streamSelect(
+                $s,
+                function (array $row) use (&$rows, $limit) {
+                    $rows[] = $row;
+                    if (count($rows) > $limit) return false;   // ここで打ち切る
+                },
+                function (array $names) use (&$columns) { $columns = $names; }
+            );
         } catch (PDOException $e) {
             throw bad('SQL の実行に失敗しました: ' . $e->getMessage(), 502);
         }
-        if (count($grid['rows']) > $limit) $grid['rows'] = array_slice($grid['rows'], 0, $limit);
-        return $grid + ['sql' => $s];
+
+        $truncated = count($rows) > $limit;
+        if ($truncated) array_pop($rows);
+
+        return ['columns' => $columns, 'rows' => $rows, 'sql' => $s,
+                'rowCount' => count($rows), 'truncated' => $truncated,
+                'elapsedMs' => (int)round((microtime(true) - $started) * 1000)];
     }
 
     /* ------------------------------------------------------------
@@ -230,6 +250,35 @@ abstract class DbDriver
 
     /** 読み取った型の区分を、その DB の型名に直す。 */
     abstract public function sqlType(array $col): string;
+
+    /**
+     * 大量の行を、1 行ずつ受け取りながら処理する。
+     *
+     * 既定の PDO は、query() の時点で結果を全部 PHP 側のメモリに読み込む。
+     * 数万行のテーブルを CSV に書き出すと、1 行目を書く前に数十 MB を使い、
+     * 共用サーバのメモリ上限に当たって落ちる。
+     * ここでは DB から少しずつ受け取り、使い終わった行は捨てていく。
+     *
+     * $onRow には数値添字の 1 行が渡される。false を返すとそこで打ち切る。
+     * $onColumns を渡すと、最初の行を読む前に列名の配列で 1 度だけ呼ばれる
+     * （0 件でも呼ばれる）。戻り値は実際に読んだ行数。
+     *
+     * 注意: 読んでいる最中に、同じ接続で別の問い合わせを投げてはいけない。
+     * 必要な情報（列定義など）は、呼ぶ前に取っておくこと。
+     */
+    abstract public function streamSelect(string $sql, callable $onRow,
+                                          ?callable $onColumns = null): int;
+
+    /** PDOStatement から列名を並べる。 */
+    protected function columnNames(PDOStatement $st): array
+    {
+        $columns = [];
+        for ($i = 0; $i < $st->columnCount(); $i++) {
+            $m = @$st->getColumnMeta($i);
+            $columns[] = $m['name'] ?? ('col' . $i);
+        }
+        return $columns;
+    }
 
     /** 自動採番の主キー 1 列分の定義。 */
     abstract public function surrogateKeySql(string $name): string;

@@ -167,6 +167,32 @@ class MysqlDriver extends DbDriver
         return $this->quote($name) . ' BIGINT NOT NULL AUTO_INCREMENT';
     }
 
+    /**
+     * MySQL の非バッファ問い合わせで、1 行ずつ受け取る。
+     *
+     * 既定（バッファあり）だと query() の時点で全行がメモリに載る。
+     * 読んでいる間はこの接続で別の問い合わせを投げられなくなるため、
+     * 終わったら必ず既定へ戻す。
+     */
+    public function streamSelect(string $sql, callable $onRow, ?callable $onColumns = null): int
+    {
+        $this->pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+        $n = 0;
+        try {
+            $st = $this->pdo->query($sql);
+            if ($onColumns !== null) $onColumns($this->columnNames($st));
+            while ($row = $st->fetch(PDO::FETCH_NUM)) {
+                $n++;
+                if ($onRow($row) === false) break;
+            }
+            // 途中で抜けた場合、残りを読み捨てて接続を次に使える状態へ戻す
+            $st->closeCursor();
+        } finally {
+            $this->pdo->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
+        }
+        return $n;
+    }
+
     public function serverInfo(): array
     {
         $row = $this->one('SELECT VERSION() AS version, DATABASE() AS db, CURRENT_USER() AS usr');

@@ -157,6 +157,49 @@ function esc(v) {
 }
 const num = (v) => Number(v).toLocaleString('ja-JP');
 
+/**
+ * 文字列を、この端末のクリップボードへ入れる。
+ *
+ * navigator.clipboard は HTTPS でないと使えないことがある。
+ * 社内で http のまま使う場合もあるので、使えなければ
+ * 昔ながらの方法（隠した欄を選択して copy）へ落とす。
+ */
+async function copyText(text) {
+  if (!text) return false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch { /* 下の方法へ */ }
+
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** コピーボタンの共通処理。押した手応えが分かるよう、少しの間だけ文言を変える。 */
+async function copyFromElement(btn, sourceSelector) {
+  const text = ($(sourceSelector) || {}).textContent || '';
+  const ok = await copyText(text);
+  if (!ok) { toast('コピーできませんでした。SQL を選んで手動でコピーしてください。', 'err'); return; }
+  const before = btn.textContent;
+  btn.textContent = 'コピーしました';
+  btn.classList.add('is-copied');
+  setTimeout(() => { btn.textContent = before; btn.classList.remove('is-copied'); }, 1400);
+}
+
 /* ============================================================
  * ツリー
  * ========================================================== */
@@ -683,13 +726,14 @@ function updateFilterValueInputs(row, kind) {
   }
 }
 
-$('#btnAddFilter').addEventListener('click', addFilterRow);
+$('#btnAddFilter').addEventListener('click', () => { addFilterRow(); refreshSqlPreview(); });
 
 /** 「条件をクリア」: 全部消して、最初の空の1行だけに戻す。 */
 $('#btnClearFilter').addEventListener('click', () => {
   $('#filterRows').innerHTML = '';
   filterRowSeq = 0;
   addFilterRow();
+  refreshSqlPreview();
 });
 
 $('#filterRows').addEventListener('click', (ev) => {
@@ -697,6 +741,7 @@ $('#filterRows').addEventListener('click', (ev) => {
   if (!btn) return;
   btn.closest('.filter-row').remove();
   ensureFilterRow();
+  refreshSqlPreview();
 });
 
 $('#filterRows').addEventListener('change', (ev) => {
@@ -708,7 +753,16 @@ $('#filterRows').addEventListener('change', (ev) => {
     const col = state.detail.columns.find((c) => c.name === row.querySelector('.filter-col').value);
     updateFilterValueInputs(row, columnKind(col ? col.dataType : ''));
   }
+  refreshSqlPreview();
 });
+
+// 値を打っている間も、そのつど SQL を出し直す
+$('#filterRows').addEventListener('input', refreshSqlPreview);
+$('#whereInput').addEventListener('input', refreshSqlPreview);
+$('#limitSelect').addEventListener('change', refreshSqlPreview);
+
+$('#btnCopySql').addEventListener('click', (ev) => copyFromElement(ev.currentTarget, '#lastSqlBox'));
+$('#btnCopyConfirmSql').addEventListener('click', (ev) => copyFromElement(ev.currentTarget, '#confirmSql'));
 
 // 検索欄で Enter を押したときも、SQL条件欄と同じく「検索」を押したことにする。
 // 条件を入力しただけで押し忘れると、前の結果が出たままになって
@@ -765,12 +819,104 @@ function describeSelect() {
   return parts.join(' / ');
 }
 
-/** 直前に実行された SQL を、CUI を開かなくても分かるようデータ欄にも出す。 */
-function showLastSql(sql) {
+/* ------------------------------------------------------------
+ * 実行する SQL の表示
+ *
+ * 条件をいじっている間は「これから実行する SQL」を組み立てて出し、
+ * 実際に検索したあとは、サーバが本当に流した SQL に差し替える。
+ * どちらを出しているかは見出しで分かるようにする。
+ * ---------------------------------------------------------- */
+
+function showSql(sql, executed) {
+  const wrap = $('#sqlLive');
   const box = $('#lastSqlBox');
-  if (!sql) { box.hidden = true; box.textContent = ''; return; }
-  box.hidden = false;
+  if (!sql) { wrap.hidden = true; box.textContent = ''; return; }
+  wrap.hidden = false;
   box.textContent = sql;
+  $('#sqlLiveLabel').textContent = executed ? '実行した SQL' : '実行する SQL（プレビュー）';
+  wrap.classList.toggle('is-preview', !executed);
+}
+
+/** 直前に実行された SQL を、CUI を開かなくても分かるようデータ欄にも出す。 */
+function showLastSql(sql) { showSql(sql, true); }
+
+/** 値を SQL の文字列リテラルにする。表示専用で、これを実行はしない。 */
+function sqlLiteral(v) {
+  return "'" + String(v).replace(/'/g, "''") + "'";
+}
+
+/** LIKE のパターン。サーバ側 filtersToWhere と同じ組み立てにする。 */
+function sqlLikePattern(op, value) {
+  const esc = String(value).replace(/([\\%_])/g, '\\$1');
+  if (op === 'contains') return `%${esc}%`;
+  if (op === 'starts_with') return `${esc}%`;
+  return `%${esc}`;
+}
+
+/**
+ * 画面の検索条件から WHERE 句を組み立てる。
+ * サーバ側 DbDriver::filtersToWhere と同じ形になるようにしている
+ * （表示だけに使い、実行するのはサーバが組み直したもの）。
+ */
+function previewWhereFromFilters(filters) {
+  const cmp = { eq: '=', ne: '<>', gt: '>', gte: '>=', lt: '<', lte: '<=' };
+  const parts = [];
+  for (const f of filters) {
+    const col = qi(f.column);
+    if (f.op === 'is_null') { parts.push(`${col} IS NULL`); continue; }
+    if (f.op === 'is_not_null') { parts.push(`${col} IS NOT NULL`); continue; }
+
+    if (f.op === 'between') {
+      const a = (f.value || '').trim();
+      const b = (f.value2 || '').trim();
+      if (!a && !b) continue;
+      if (a && b) parts.push(`${col} BETWEEN ${sqlLiteral(a)} AND ${sqlLiteral(b)}`);
+      else if (a) parts.push(`${col} >= ${sqlLiteral(a)}`);
+      else parts.push(`${col} <= ${sqlLiteral(b)}`);
+      continue;
+    }
+
+    if (f.op === 'in') {
+      const items = String(f.value || '').split(/[,\n]/).map((s) => s.trim()).filter(Boolean);
+      if (!items.length) continue;
+      parts.push(`${col} IN (${items.map(sqlLiteral).join(', ')})`);
+      continue;
+    }
+
+    const val = (f.value || '').trim();
+    if (!val) continue;
+    if (f.op === 'contains' || f.op === 'starts_with' || f.op === 'ends_with') {
+      parts.push(`${col} LIKE ${sqlLiteral(sqlLikePattern(f.op, val))} ESCAPE '\\\\'`);
+      continue;
+    }
+    parts.push(`${col} ${cmp[f.op] || '='} ${sqlLiteral(val)}`);
+  }
+  return parts.join(' AND ');
+}
+
+/** いま画面に入っている条件で、これから実行される SELECT 文を組み立てる。 */
+function buildPreviewSql() {
+  const { schema, table } = state.sel;
+  if (!table) return '';
+
+  const raw = $('#whereInput').value.trim();
+  const fromFilters = previewWhereFromFilters(collectFilters());
+  let where = '';
+  if (raw && fromFilters) where = `(${raw}) AND (${fromFilters})`;
+  else where = raw || fromFilters;
+
+  let sql = `SELECT * FROM ${qt(schema, table.name)}`;
+  if (where) sql += `\nWHERE ${where}`;
+  if (state.orderBy) sql += `\nORDER BY ${qi(state.orderBy)} ${state.orderDir === 'DESC' ? 'DESC' : 'ASC'}`;
+  const limit = Number($('#limitSelect').value) || state.limit;
+  sql += `\nLIMIT ${limit} OFFSET ${state.offset}`;
+  return sql;
+}
+
+/** 条件をいじるたびに、これから実行する SQL を出し直す。 */
+function refreshSqlPreview() {
+  if (!state.sel.table) return;
+  showSql(buildPreviewSql(), false);
 }
 
 async function loadRows() {
@@ -1353,12 +1499,15 @@ async function runCuiSql(sql) {
   const id = requireServer();
 
   if (looksReadOnly(sql)) {
+    const limit = 200;
+    // サーバ側は limit という名前で読む。maxRows で送っても既定値になるだけだった。
     const r = await api(`/api/db/${id}/query`, {
-      method: 'POST', body: { sql, database: state.sel.database, maxRows: 200 },
+      method: 'POST', body: { sql, database: state.sel.database, limit },
     });
     if (!r.rows.length) return cout('0 行', 'c-info');
     coutTable(r.columns, r.rows);
-    return cout(`${num(r.rowCount)} 行 / ${r.elapsedMs}ms${r.truncated ? '（先頭200行を表示）' : ''}`, 'c-info');
+    return cout(`${num(r.rowCount)} 行 / ${r.elapsedMs}ms`
+              + (r.truncated ? `（先頭 ${num(limit)} 行を表示。続きがあります）` : ''), 'c-info');
   }
 
   if (!canWrite(id)) {

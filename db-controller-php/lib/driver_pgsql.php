@@ -109,6 +109,46 @@ class PgsqlDriver extends DbDriver
         return $this->quote($name) . ' BIGINT GENERATED ALWAYS AS IDENTITY';
     }
 
+    /**
+     * サーバ側カーソルで、1 行ずつ受け取る。
+     *
+     * PostgreSQL の PDO は、非バッファの指定が無く、query() で全行を受け取ってしまう。
+     * カーソルを宣言して少しずつ FETCH すれば、必要な分だけ取り寄せられる。
+     * カーソルはトランザクションの中でしか使えないので、ここで開いて閉じる。
+     */
+    public function streamSelect(string $sql, callable $onRow, ?callable $onColumns = null): int
+    {
+        // 呼び出し側が既にトランザクションを開いていれば、それに乗る
+        $ownTx = !$this->pdo->inTransaction();
+        if ($ownTx) $this->pdo->beginTransaction();
+
+        // 同時に複数開いても衝突しないよう、名前を毎回変える
+        $cur = 'dbc_cur_' . bin2hex(random_bytes(6));
+        $n = 0;
+        try {
+            $this->pdo->exec("DECLARE {$cur} NO SCROLL CURSOR FOR " . $sql);
+            $stop = false;
+            $told = false;
+            while (!$stop) {
+                $st = $this->pdo->query("FETCH 1000 FROM {$cur}");
+                // 列名は 0 件でも取れるので、最初の FETCH の時点で伝える
+                if (!$told && $onColumns !== null) { $onColumns($this->columnNames($st)); $told = true; }
+                $batch = $st->fetchAll(PDO::FETCH_NUM);
+                if (!$batch) break;
+                foreach ($batch as $row) {
+                    $n++;
+                    if ($onRow($row) === false) { $stop = true; break; }
+                }
+            }
+            $this->pdo->exec("CLOSE {$cur}");
+            if ($ownTx) $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($ownTx && $this->pdo->inTransaction()) $this->pdo->rollBack();
+            throw $e;
+        }
+        return $n;
+    }
+
     public function serverInfo(): array
     {
         $row = $this->one(

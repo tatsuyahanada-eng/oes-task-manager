@@ -7,7 +7,7 @@
  *     DB のデータや接続情報が端末に residual として残らないようにするため
  * ========================================================== */
 
-const CACHE = 'dbctl-shell-v22';
+const CACHE = 'dbctl-shell-v23';
 
 const SHELL = [
   './',

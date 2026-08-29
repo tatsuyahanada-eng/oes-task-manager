@@ -37,10 +37,13 @@ function csv_export(DbDriver $drv, string $schema, string $table,
     $sql = 'SELECT * FROM ' . $drv->qualify($schema, $table);
     if ($where !== '') $sql .= ' WHERE ' . ($whereValidated ? $where : $drv->assertWhere($where));
 
-    $st = $drv->pdo()->query($sql);
+    // 件数が読めないので、実行時間の上限を外す。
+    // 途中で打ち切られると、壊れた CSV が保存されてしまう。
+    @set_time_limit(0);
+
     $buffer = '';
     $n = 0;
-    while ($row = $st->fetch(PDO::FETCH_NUM)) {
+    $drv->streamSelect($sql, function (array $row) use (&$buffer, &$n, $delimiter, $encoding) {
         $buffer .= csv_line($row, $delimiter);
         // 一定量ごとに送り出す。全件をメモリに積まない。
         if (++$n % 500 === 0) {
@@ -49,7 +52,7 @@ function csv_export(DbDriver $drv, string $schema, string $table,
             if (ob_get_level()) @ob_flush();
             @flush();
         }
-    }
+    });
     if ($buffer !== '') echo csv_encode($buffer, $encoding);
     exit;
 }
@@ -271,6 +274,8 @@ function csv_import(DbDriver $drv, string $schema, string $table,
     array_shift($rows);   // 見出しを外す
 
     $matched = $preview['matched'];
+    // 既定は NULL として取り込む。画面から false を渡されたときだけ空文字にする。
+    $emptyAsNull = !array_key_exists('emptyAsNull', $opts) || (bool)$opts['emptyAsNull'];
     $cols = array_map(fn($m) => $drv->quote($m['tableColumn']), $matched);
 
     $sql = 'INSERT INTO ' . $drv->qualify($schema, $table)
@@ -287,8 +292,12 @@ function csv_import(DbDriver $drv, string $schema, string $table,
             $params = [];
             foreach ($matched as $m) {
                 $v = $r[$m['index']] ?? null;
-                // 空欄は NULL として入れる（空文字ではなく）
-                if ($v === '' || $v === null) { $params[] = null; continue; }
+                // 空欄の扱い。画面の「空欄は NULL として取り込む」に従う。
+                // NULL を許さない列では、外していても NULL にはできないので空文字のまま入れる。
+                if ($v === '' || $v === null) {
+                    $params[] = ($emptyAsNull && $m['nullable']) ? null : ($v === null ? null : '');
+                    continue;
+                }
                 // 真偽値の列だけ、true / Y などを 1 / 0 にそろえる
                 if (csv_is_bool_column((string)$m['dataType'])) $v = csv_bool_value((string)$v);
                 // 日付の列だけ、26-AUG-26 などを YYYY-MM-DD にそろえる
@@ -341,21 +350,45 @@ function csv_export_schema(DbDriver $drv, string $schema, string $encoding, stri
         throw bad('ZIP を作れませんでした。', 500);
     }
 
+    // テーブル数も件数も読めないので、実行時間の上限を外す
+    @set_time_limit(0);
+
     $summary = [];
+    $parts = [];   // 一時ファイルの後始末用
     foreach ($tables as $t) {
         // ビューも中身は取れるが、戻せないので分けて記録する
         $detail = $drv->describeTable($schema, $t['name']);
         $columns = array_map(fn($c) => $c['name'], $detail['columns']);
 
-        $body = '';
-        if ($encoding === 'utf-8') $body .= DBC_BOM;
-        $body .= csv_line($columns, $delimiter);
+        // CSV 全文をメモリに積むと、大きいテーブルで上限に当たる。
+        // 一度ファイルへ書き出し、ZIP にはそのファイルを渡す。
+        $part = tempnam(sys_get_temp_dir(), 'dbcpart');
+        $parts[] = $part;
+        $fh = fopen($part, 'wb');
+        if ($fh === false) {
+            foreach ($parts as $p) @unlink($p);
+            @unlink($tmp);
+            throw bad('一時ファイルを作れませんでした。', 500);
+        }
 
-        $st = $drv->pdo()->query('SELECT * FROM ' . $drv->qualify($schema, $t['name']));
-        $n = 0;
-        while ($row = $st->fetch(PDO::FETCH_NUM)) { $body .= csv_line($row, $delimiter); $n++; }
+        if ($encoding === 'utf-8') fwrite($fh, DBC_BOM);
+        fwrite($fh, csv_encode(csv_line($columns, $delimiter), $encoding));
 
-        $zip->addFromString($t['name'] . '.csv', csv_encode($body, $encoding));
+        $buf = '';
+        $n = $drv->streamSelect(
+            'SELECT * FROM ' . $drv->qualify($schema, $t['name']),
+            function (array $row) use (&$buf, $fh, $delimiter, $encoding) {
+                $buf .= csv_line($row, $delimiter);
+                if (strlen($buf) >= 262144) {   // 256KB ごとに書き出す
+                    fwrite($fh, csv_encode($buf, $encoding));
+                    $buf = '';
+                }
+            }
+        );
+        if ($buf !== '') fwrite($fh, csv_encode($buf, $encoding));
+        fclose($fh);
+
+        $zip->addFile($part, $t['name'] . '.csv');
         $summary[] = sprintf('%-40s %8d 行  %s', $t['name'], $n, $t['type']);
     }
 
@@ -365,7 +398,9 @@ function csv_export_schema(DbDriver $drv, string $schema, string $encoding, stri
             . "文字コード: {$encoding}\n\n"
             . implode("\n", $summary) . "\n";
     $zip->addFromString('_目録.txt', csv_encode($readme, $encoding));
+    // addFile() は close() の時点でファイルを読む。ここまで消してはいけない。
     $zip->close();
+    foreach ($parts as $p) @unlink($p);
 
     $filename = sprintf('%s_%s.zip', $schema, gmdate('Ymd_His'));
     header('Content-Type: application/zip');

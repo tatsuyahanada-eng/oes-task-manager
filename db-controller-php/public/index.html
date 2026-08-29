@@ -111,7 +111,13 @@
       <button class="btn btn-sm btn-primary" id="btnReload">検索</button>
     </div>
 
-    <pre class="sql-inline" id="lastSqlBox" hidden></pre>
+    <div class="sql-live" id="sqlLive" hidden>
+      <div class="sql-live-head">
+        <span class="sql-live-label" id="sqlLiveLabel">実行する SQL</span>
+        <button type="button" class="btn btn-sm" id="btnCopySql">コピー</button>
+      </div>
+      <pre class="sql-inline" id="lastSqlBox"></pre>
+    </div>
 
     <div class="grid-wrap" id="gridWrap">
       <p class="empty">左のツリーからテーブルを選んでください</p>
@@ -369,7 +375,10 @@
       <button class="icon-btn" id="btnCloseConfirm" aria-label="閉じる">✕</button>
     </div>
     <div id="confirmBody"></div>
-    <p class="section-label">実行される SQL</p>
+    <p class="section-label section-label-row">
+      実行される SQL
+      <button type="button" class="btn btn-sm" id="btnCopyConfirmSql">コピー</button>
+    </p>
     <pre class="sql-block" id="confirmSql"></pre>
     <label class="check check-strong" id="confirmAllRowsWrap" hidden>
       <input type="checkbox" id="confirmAllRows">

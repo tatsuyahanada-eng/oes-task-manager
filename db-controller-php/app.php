@@ -501,6 +501,8 @@ function route_db(string $method, array $seg): void
         $opts = [
             'encoding'  => (string)($_GET['encoding'] ?? ''),
             'delimiter' => ($_GET['delimiter'] ?? '') === 'tab' ? "\t" : (string)($_GET['delimiter'] ?? ''),
+            // 画面の「空欄は NULL として取り込む」。既定は NULL。
+            'emptyAsNull' => ($_GET['emptyAsNull'] ?? 'true') !== 'false',
         ];
         $bytes = raw_in();
         if ($bytes === '') json_out(['error' => 'CSV が空です。'], 400);
