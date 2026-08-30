@@ -685,6 +685,8 @@ select option { background: var(--bg-raise); color: var(--text); }
 .audit-action.update { color: var(--warn); }
 .audit-action.delete { color: var(--danger); }
 .audit-action.execute { color: var(--write); }
+.audit-action.drop-table { color: var(--danger); }
+.audit-action.trial-import { color: var(--ok); }
 .audit-sql { color: var(--text-mute); word-break: break-all; margin-top: 2px; }
 
 /* ---------- トースト ---------- */
@@ -1030,6 +1032,7 @@ input[type=file]::file-selector-button {
   max-width: 34em;
 }
 .trial-box .sql-block { margin-top: 4px; }
+.trial-error-actions { display: flex; gap: 6px; margin: 4px 0 8px; flex-wrap: wrap; }
 
 
 /* ---------- CSV パネルの「どこまでが安全か」手順表示 ---------- */

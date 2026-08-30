@@ -768,5 +768,34 @@ function route_db(string $method, array $seg): void
             ]);
             json_out(['ok' => true, 'affected' => $result['affected'], 'sql' => $result['sql']]);
         }
+
+        /* ---- テーブルの削除。取り消せないので、管理者かつ本人のパスワード再入力を必須にする ---- */
+        if ($tail === 'drop' && $method === 'DELETE') {
+            if (!has_role($user, 'admin')) {
+                json_out(['error' => 'この操作には「管理者」の権限が必要です。'], 403);
+            }
+            assert_writable($conn);
+
+            $in = json_in();
+            $password = (string)pick($in, 'password', '');
+            if ($password === '' || strlen($password) > 500
+                || !password_verify($password, (string)($user['hash'] ?? ''))) {
+                json_out(['error' => 'パスワードが違います。'], 401);
+            }
+
+            $detail = $drv->describeTable($schema, $table);
+            if ($detail['type'] !== 'TABLE') {
+                json_out(['error' => 'ビューは削除できません。'], 400);
+            }
+
+            $sql = $drv->dropTable($schema, $table);
+            audit([
+                'action' => 'drop-table', 'user' => $user['username'],
+                'connection' => $conn['name'], 'type' => $conn['type'],
+                'database' => $database, 'target' => "{$schema}.{$table}",
+                'sql' => $sql . '（管理者本人のパスワード確認済み）',
+            ]);
+            json_out(['ok' => true, 'sql' => $sql]);
+        }
     }
 }

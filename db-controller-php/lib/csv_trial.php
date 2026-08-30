@@ -112,6 +112,8 @@ function csv_trial_import(DbDriver $drv, string $tempName, array $columns,
                     'line'    => $i + 2,          // 見出しが 1 行目
                     'message' => csv_trial_reason($e->getMessage()),
                     'raw'     => $e->getMessage(),
+                    // 元の CSV の値（見出しと同じ並び順）。直して出し直せるように。
+                    'row'     => $r,
                 ];
             }
         }
@@ -133,6 +135,7 @@ function csv_trial_import(DbDriver $drv, string $tempName, array $columns,
         'failed'         => $errorTotal,
         'errors'         => $errors,
         'errorsShown'    => count($errors),
+        'header'         => $header,   // 通らなかった行を CSV に書き出すための、元の見出し
         'columns'        => array_column($matched, 'column'),
         'ignoredColumns' => $ignored,
         'encoding'       => $encoding,

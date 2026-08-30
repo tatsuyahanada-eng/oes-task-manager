@@ -465,6 +465,21 @@ abstract class DbDriver
         return $sql;
     }
 
+    /**
+     * テーブルを実際に消す。取り消せないので、呼び出し側
+     * （app.php のルート）で管理者本人のパスワード再確認を必須にしている。
+     */
+    public function dropTable(string $schema, string $table): string
+    {
+        $sql = 'DROP TABLE ' . $this->qualify($schema, $table);
+        try {
+            $this->pdo->exec($sql);
+        } catch (PDOException $e) {
+            throw bad('テーブルを削除できませんでした: ' . $e->getMessage(), 502);
+        }
+        return $sql;
+    }
+
     /** 完全修飾したテーブル名。 */
     public function qualify(string $schema, string $table): string
     {

@@ -228,6 +228,7 @@ function updateBadges() {
   if (!id) {
     badge.hidden = true;
     $('#btnAddRow').hidden = true;
+    $('#btnDropTable').hidden = true;
     return;
   }
   const w = canWrite(id);
@@ -241,6 +242,12 @@ function updateBadges() {
   const editable = w && state.detail && state.detail.primaryKey.length
     && state.sel.table && state.sel.table.type === 'TABLE';
   $('#btnAddRow').hidden = !editable;
+
+  // テーブルの削除は、書き込み可であることに加えて管理者であることを要る。
+  // 実行時にも本人のパスワードを再確認するので、ここでは出す・出さないだけを決める。
+  const dropAllowed = w && state.me && state.me.canManageUsers
+    && state.sel.table && state.sel.table.type === 'TABLE';
+  $('#btnDropTable').hidden = !dropAllowed;
 
   // 読取専用で、かつ自分で解除できる（管理者）なら、バッジを押せるようにする。
   // 「なぜ直せないのか」で終わらせず、「ここを押せば直せる」までつなげる。
@@ -1107,6 +1114,41 @@ $('#rowEditor').addEventListener('change', (ev) => {
 });
 
 $('#btnAddRow').addEventListener('click', () => openRowEditor('insert', null));
+
+$('#btnDropTable').addEventListener('click', () => {
+  const { serverId, database, schema, table } = state.sel;
+  if (!table) return;
+  const s = serverById(serverId);
+
+  openConfirm({
+    title: 'テーブルを削除',
+    danger: true,
+    confirmLabel: '削除する',
+    requirePassword: true,
+    alertOnSuccess: true,
+    body: `<div class="notice danger"><strong>この操作は取り消せません。</strong><br>
+        「<strong>${esc(s ? s.name : '(接続先不明)')}</strong>」の
+        <strong>${esc(schema)}.${esc(table.name)}</strong> を完全に削除します。
+        中に入っているデータも一緒に消えます。</div>
+      <div class="notice">確認のため、<strong>ご自身のログインパスワード</strong>をもう一度入力してください。</div>`,
+    sql: `DROP TABLE ${schema}.${table.name};`,
+    run: () => api(dbPath(serverId, `tables/${schema}/${table.name}/drop`, { database }), {
+      method: 'DELETE',
+      body: { password: $('#confirmPassword').value },
+    }),
+    done: `${schema}.${table.name} を削除しました`,
+    cuiHint: `DROP TABLE ${schema}.${table.name};`,
+    // 削除したテーブルはもう無いので、行の再読み込みではなくツリーを開き直す
+    after: async () => {
+      state.sel.table = null;
+      state.detail = null;
+      setView('tree');
+      const key = nodeKey('sch', serverId, database, schema);
+      if (state.open[key]) await toggleSchema(serverId, database, schema, true);
+      updateBadges();
+    },
+  });
+});
 $('#btnCancelRow').addEventListener('click', () => { $('#rowModal').hidden = true; state.editing = null; });
 $('#btnCloseRow').addEventListener('click', () => { $('#rowModal').hidden = true; state.editing = null; });
 
@@ -1181,23 +1223,37 @@ function confirmDelete(index) {
 /* ---------- 実行確認 ---------- */
 
 function openConfirm({ title, danger, body, sql, run, done, after, cuiHint,
-                      requireAllRows = false }) {
+                      requireAllRows = false, requirePassword = false,
+                      confirmLabel, alertOnSuccess = false }) {
   // after を渡すと、成功後の後始末をそれに差し替える (既定は行の読み直し)
   // cuiHint は、同じ操作を CUI で書くときの形
-  state.pending = { run, done, after, cuiHint };
+  // confirmLabel を渡さないときは、danger の有無だけで文言を決める（既定の後方互換）
+  state.pending = { run, done, after, cuiHint, alertOnSuccess };
   $('#confirmTitle').textContent = title;
   $('#confirmBody').innerHTML = body;
   $('#confirmSql').textContent = sql;
   $('#confirmMessage').textContent = '';
   $('#btnRunConfirm').className = danger ? 'btn btn-danger' : 'btn btn-write';
-  $('#btnRunConfirm').textContent = danger ? '削除する' : '実行';
+  $('#btnRunConfirm').textContent = confirmLabel || (danger ? '削除する' : '実行');
   $('#confirmAllRows').checked = false;
   $('#confirmAllRowsWrap').hidden = !requireAllRows;
-  $('#btnRunConfirm').disabled = requireAllRows;
+  $('#confirmPassword').value = '';
+  $('#confirmPasswordWrap').hidden = !requirePassword;
+  updateConfirmRunEnabled();
   $('#confirmModal').hidden = false;
+  if (requirePassword) setTimeout(() => $('#confirmPassword').focus(), 50);
 }
 
-$('#confirmAllRows').addEventListener('change', (e) => { $('#btnRunConfirm').disabled = !e.target.checked; });
+/** チェックボックスやパスワード欄など、必須項目が揃うまで実行ボタンを押せなくする。 */
+function updateConfirmRunEnabled() {
+  const needsAllRows = !$('#confirmAllRowsWrap').hidden;
+  const needsPassword = !$('#confirmPasswordWrap').hidden;
+  const allRowsOk = needsAllRows ? $('#confirmAllRows').checked : true;
+  const passwordOk = needsPassword ? $('#confirmPassword').value !== '' : true;
+  $('#btnRunConfirm').disabled = !(allRowsOk && passwordOk);
+}
+$('#confirmAllRows').addEventListener('change', updateConfirmRunEnabled);
+$('#confirmPassword').addEventListener('input', updateConfirmRunEnabled);
 const closeConfirm = () => { $('#confirmModal').hidden = true; state.pending = null; };
 $('#btnCancelConfirm').addEventListener('click', closeConfirm);
 $('#btnCloseConfirm').addEventListener('click', closeConfirm);
@@ -1209,6 +1265,7 @@ $('#btnRunConfirm').addEventListener('click', async () => {
   const label = b.textContent;
   b.textContent = '実行中…';
   const editMode = state.editing ? state.editing.mode : null;
+  const alertOnSuccess = state.pending.alertOnSuccess;
   try {
     const r = await state.pending.run();
     const n = r && (r.affected !== undefined ? r.affected : r.inserted);
@@ -1228,8 +1285,8 @@ $('#btnRunConfirm').addEventListener('click', async () => {
     state.pending = null;
     state.editing = null;
     toast(msg, 'ok');
-    // 修正・削除は見落としが無いよう、通知(トースト)に加えてアラートでも知らせる
-    if (editMode === 'update' || editMode === 'delete') alert(msg);
+    // 修正・削除・その他の重い操作は見落としが無いよう、通知(トースト)に加えてアラートでも知らせる
+    if (editMode === 'update' || editMode === 'delete' || alertOnSuccess) alert(msg);
     await (after ? after() : loadRows());
   } catch (err) {
     $('#confirmMessage').className = 'form-message err';
@@ -1490,6 +1547,7 @@ async function runCuiSql(sql) {
   openConfirm({
     title: '更新系 SQL の実行',
     danger: true,
+    confirmLabel: '実行する',
     requireAllRows: all,
     body: `${all ? '<div class="notice danger"><strong>WHERE 句がありません。</strong><br>テーブルの<strong>全行</strong>が対象になります。</div>' : ''}
       <div class="notice danger"><strong>影響範囲を確認してください。</strong><br>
@@ -1910,8 +1968,8 @@ async function loadCsvOptions() {
   return csvOptions;
 }
 
-$('#btnCsv').addEventListener('click', async () => {
-  if (!state.sel.serverId) return toast('サーバを選んでください', 'err');
+async function openCsvModal() {
+  if (!state.sel.serverId) { toast('サーバを選んでください', 'err'); return false; }
   await loadCsvOptions();
 
   const { schema, table, database } = state.sel;
@@ -1952,7 +2010,9 @@ $('#btnCsv').addEventListener('click', async () => {
 
   $('#csvModal').hidden = false;
   loadBackupInfo();
-});
+  return true;
+}
+$('#btnCsv').addEventListener('click', openCsvModal);
 
 $('#btnCloseCsv').addEventListener('click', () => { $('#csvModal').hidden = true; });
 
@@ -1963,6 +2023,32 @@ $$('#csvTabs .seg-btn').forEach((b) => b.addEventListener('click', () => {
   $('#csvModal .sheet').classList.toggle('sheet-wide',
     b.dataset.csv === 'newtable' || b.dataset.csv === 'import');
 }));
+
+/** CSV パネルのタブを、押させずに切り替える（テーブル作成の直後などに使う）。 */
+function switchCsvTab(tab) {
+  const btn = document.querySelector(`#csvTabs .seg-btn[data-csv="${tab}"]`);
+  if (btn) btn.click();
+}
+
+/** <input type=file> に、既に選ばれている File を差し込む。 */
+function setFileInputFile(input, file) {
+  const dt = new DataTransfer();
+  dt.items.add(file);
+  input.files = dt.files;
+}
+
+/**
+ * 「テーブルを作る」の直後、同じ CSV のまま「取り込み」タブへ進み、
+ * 内容の確認まで自動で終わらせておく。ファイルを選び直す手間を無くすため。
+ */
+async function openImportWithCarriedFile(file) {
+  const opened = await openCsvModal();
+  if (!opened) return;
+  switchCsvTab('import');
+  setFileInputFile($('#csvFile'), file);
+  $('#btnCsvTrial').disabled = !state.sel.table || !file;
+  await runCsvPreview();
+}
 
 /** 出力用のクエリ文字列を組み立てる。 */
 function csvQuery(extra = {}) {
@@ -2236,24 +2322,35 @@ $('#btnNewTableCreate').addEventListener('click', () => {
   const cols = collectNewTableColumns().filter((c) => !c.skip);
   const sk = $('#newTableSurrogate').checked ? surrogateName() : '';
   const { serverId, database, schema } = state.sel;
+  // #newTableFile は after の中でリセットするので、それより前に確保しておく
+  const carryFile = $('#newTableFile').files[0] || null;
 
   openConfirm({
     title: 'テーブルを作る',
     body: `<div class="notice">${esc(schema)}.<strong>${esc(table)}</strong> を
       ${cols.length} 列${sk ? `（＋自動採番の ${esc(sk)}）` : ''}で作ります。</div>
       <div class="notice">この操作は既存のデータを変更しません。作ったあと、
-      「取り込み」タブから同じ CSV を入れられます。</div>`,
+      同じ CSV でそのまま「取り込み」タブへ進みます。</div>`,
     sql: $('#newTableSql').textContent,
     run: () => api(dbPath(serverId, 'create-table', { database }),
       { method: 'POST', body: { schema, table, columns: cols, surrogateKey: sk } }),
     done: 'テーブルを作りました',
     cuiHint: `\\tables`,
-    // 作ったあとはツリーを開き直して、新しいテーブルが見えるようにする
+    // 作ったあとはツリーを開き直して、新しいテーブルを選び、
+    // 同じ CSV のまま「取り込み」タブへ進めておく（読み取ったCSVをもう一度選ばせない）
     after: async () => {
       const key = nodeKey('sch', serverId, database, schema);
       if (state.open[key]) await toggleSchema(serverId, database, schema, true);
       resetNewTablePanel();
       $('#newTableFile').value = '';
+
+      await openTable(serverId, database, schema, table, 'TABLE');
+      if (carryFile) {
+        await openImportWithCarriedFile(carryFile);
+      } else {
+        await openCsvModal();
+        switchCsvTab('import');
+      }
     },
   });
 });
@@ -2289,7 +2386,11 @@ async function postCsv(path, buffer) {
   return payload;
 }
 
-$('#btnCsvPreview').addEventListener('click', async () => {
+/**
+ * 「内容を確認」の本体。お試し取り込みが問題無く終わったときにも、
+ * ボタンを押させずにここから直接呼ぶ（本番向けの内容確認まで自動で進める）。
+ */
+async function runCsvPreview() {
   const file = $('#csvFile').files[0];
   const msg = $('#csvImportMessage');
   msg.className = 'form-message';
@@ -2311,7 +2412,8 @@ $('#btnCsvPreview').addEventListener('click', async () => {
     msg.className = 'form-message err';
     msg.textContent = err.message;
   }
-});
+}
+$('#btnCsvPreview').addEventListener('click', runCsvPreview);
 
 function renderCsvPreview(p) {
   const map = p.mapping.map((m) => m.tableColumn
@@ -2355,6 +2457,8 @@ $('#btnCsvImport').addEventListener('click', () => {
   openConfirm({
     title: 'CSV の取り込み',
     danger: true,
+    confirmLabel: '取り込む',
+    alertOnSuccess: true,
     body: `<div class="notice danger"><strong>${num(p.totalRows)} 行</strong>を
         <strong>${esc(p.schema)}.${esc(p.table)}</strong> に追加します。<br>
         1 行でも失敗した場合は、すべて取り消します（途中まで入ることはありません）。</div>
@@ -2415,7 +2519,7 @@ function trialFormat() {
 }
 
 /** お試しの結果を描く。テーブル作成・取り込みの両方から使う。 */
-function renderTrial(box, r) {
+function renderTrial(box, r, context) {
   const ok = r.failed === 0;
   const head = ok
     ? `<div class="trial-head is-ok">そのまま取り込めます
@@ -2423,8 +2527,14 @@ function renderTrial(box, r) {
     : `<div class="trial-head is-ng">${num(r.failed)} 行が取り込めません
          <span class="trial-count">成功 ${num(r.inserted)} 行 / 試した ${num(r.tried)} 行</span></div>`;
 
+  // 成功と失敗を混ぜずに出す。失敗した行だけを、あとで抜き出して直せるように
+  // CSV でダウンロードできるボタンを添える。
   const errs = r.errors.length ? `
-    <p class="section-label">通らなかった行</p>
+    <p class="section-label">通らなかった行（${num(r.failed)} 行）</p>
+    <div class="trial-error-actions">
+      <button type="button" class="btn btn-sm" data-trial-act="download-errors">エラー行だけを CSV でダウンロード</button>
+      <button type="button" class="btn btn-sm" data-trial-act="copy-errors">エラー内容をコピー</button>
+    </div>
     <div class="grid-wrap trial-errors">
       <table class="grid">
         <thead><tr><th>行</th><th>理由</th><th>元のメッセージ</th></tr></thead>
@@ -2436,14 +2546,15 @@ function renderTrial(box, r) {
       </table>
     </div>
     ${r.failed > r.errorsShown
-      ? `<p class="muted">ほかに ${num(r.failed - r.errorsShown)} 行あります。表示は ${num(r.errorsShown)} 行までです。</p>`
+      ? `<p class="muted">ほかに ${num(r.failed - r.errorsShown)} 行あります。表示は ${num(r.errorsShown)} 行までです
+           （ダウンロードには含まれません。上限を超えた分は、通った行の中から探してください）。</p>`
       : ''}` : '';
 
   const ignored = (r.ignoredColumns || []).length
     ? `<div class="csv-warn">CSV にあって取り込まれない列: ${esc(r.ignoredColumns.join(', '))}</div>` : '';
 
   const sample = (r.sample || []).length ? `
-    <p class="section-label">入った中身（先頭 ${num(r.sample.length)} 行）</p>
+    <p class="section-label">正常に取り込めた中身（先頭 ${num(r.sample.length)} 行）</p>
     <div class="grid-wrap trial-sample">
       <table class="grid">
         <thead><tr>${r.columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>
@@ -2452,17 +2563,74 @@ function renderTrial(box, r) {
       </table>
     </div>` : '';
 
+  const nextStep = ok && context === 'import'
+    ? `<div class="notice trial-steps">お試しで問題は見つかりませんでした。続けて内容を確認しています…</div>`
+    : (ok && context === 'newtable'
+      ? `<div class="notice trial-steps">お試しで問題は見つかりませんでした。「テーブルを作る」へ進んでください。</div>`
+      : '');
+
   box.hidden = false;
   box.innerHTML = `${head}
     <div class="notice">この結果は<strong>使い捨てのテーブル</strong>で試したものです。
       本番のテーブルは何も変わっていません。</div>
+    ${nextStep}
     ${ignored}${errs}${sample}
     <p class="section-label">試したときの SQL</p>
     <pre class="sql-block">${esc(r.createSql)};\n\n${esc(r.sql)}</pre>`;
+  // ダウンロード・コピーのボタンから参照できるよう、結果をこの箱に持たせておく
+  box._trialResult = r;
 }
 
+/** 通らなかった行だけを、元の CSV と同じ形（見出し＋理由列）で組み立てる。 */
+function trialErrorsAsCsv(r) {
+  const header = [...(r.header || []), 'エラー理由'];
+  const escCell = (v) => {
+    const s = v === null || v === undefined ? '' : String(v);
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [header.map(escCell).join(',')];
+  for (const e of r.errors) {
+    lines.push([...(e.row || []), e.message].map(escCell).join(','));
+  }
+  // Excel で開いても文字化けしないよう BOM を付ける
+  return '\uFEFF' + lines.join('\r\n') + '\r\n';
+}
+
+function trialErrorsAsText(r) {
+  return r.errors.map((e) => `${e.line} 行目: ${e.message}（${e.raw}）`).join('\n');
+}
+
+/** 文字列をファイルとしてこの端末へ保存する。 */
+function downloadText(filename, text, mime) {
+  const blob = new Blob([text], { type: mime || 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+}
+
+function handleTrialBoxClick(ev) {
+  const btn = ev.target.closest('[data-trial-act]');
+  if (!btn) return;
+  const r = ev.currentTarget._trialResult;
+  if (!r) return;
+  if (btn.dataset.trialAct === 'download-errors') {
+    downloadText('お試し取り込み_エラー行.csv', trialErrorsAsCsv(r), 'text/csv');
+    toast('エラー行だけを CSV でダウンロードしました', 'ok');
+  } else if (btn.dataset.trialAct === 'copy-errors') {
+    copyText(trialErrorsAsText(r)).then((done) => {
+      toast(done ? 'エラー内容をコピーしました' : 'コピーできませんでした', done ? 'ok' : 'err');
+    });
+  }
+}
+$('#newTableTrial').addEventListener('click', handleTrialBoxClick);
+$('#csvTrial').addEventListener('click', handleTrialBoxClick);
+
 /** 実行の共通部分。ボタン・メッセージ欄・結果欄をまとめて面倒みる。 */
-async function runTrial({ btn, box, msg, file, plan, label }) {
+async function runTrial({ btn, box, msg, file, plan, label, context }) {
   msg.className = 'form-message';
   if (!file) { msg.className = 'form-message err'; msg.textContent = 'CSV ファイルを選んでください。'; return; }
   if (!state.sel.schema) { msg.className = 'form-message err'; msg.textContent = 'ツリーでスキーマを選んでください。'; return; }
@@ -2473,7 +2641,7 @@ async function runTrial({ btn, box, msg, file, plan, label }) {
   box.hidden = true;
   try {
     const r = await postTrial(serverId, database, plan, file);
-    renderTrial(box, r);
+    renderTrial(box, r, context);
     msg.textContent = '';
     toast(r.failed === 0 ? 'お試し取り込み: そのまま取り込めます'
                          : `お試し取り込み: ${num(r.failed)} 行が取り込めません`,
@@ -2483,6 +2651,12 @@ async function runTrial({ btn, box, msg, file, plan, label }) {
       `${r.createSql};\n${r.sql}`,
       null
     );
+
+    // 取り込みタブで問題が無かったときは、そのまま本番向けの内容確認まで進めておく。
+    // （テーブル作成タブは、まだ本物のテーブルが無いのでここでは進めない）
+    if (context === 'import' && r.failed === 0) {
+      await runCsvPreview();
+    }
   } catch (err) {
     box.hidden = true;
     msg.className = 'form-message err';
@@ -2501,6 +2675,7 @@ $('#btnNewTableTrial').addEventListener('click', () => {
     msg: $('#newTableMessage'),
     file: $('#newTableFile').files[0],
     label: $('#newTableName').value.trim() || '新しいテーブル',
+    context: 'newtable',
     plan: {
       mode: 'plan',
       schema: state.sel.schema,
@@ -2521,6 +2696,7 @@ $('#btnCsvTrial').addEventListener('click', () => {
     msg: $('#csvImportMessage'),
     file: $('#csvFile').files[0],
     label: `${state.sel.schema}.${state.sel.table.name}`,
+    context: 'import',
     plan: {
       mode: 'existing',
       schema: state.sel.schema,
