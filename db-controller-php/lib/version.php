@@ -7,5 +7,5 @@
  * （新しい書き方を足すと、診断ページ自体が表示できなくなる）
  */
 
-define('DBC_VERSION', '2026-08-30c');
+define('DBC_VERSION', '2026-08-30d');
 define('DBC_MIN_PHP', '7.4.0');

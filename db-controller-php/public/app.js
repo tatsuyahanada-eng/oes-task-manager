@@ -305,6 +305,12 @@ function setChildren(key, html) {
 
 $('#tree').addEventListener('click', async (ev) => {
   if (ev.target.dataset.act === 'add-server') return openServerModal(null);
+  if (ev.target.dataset.act === 'clear-tree-filter') {
+    $('#treeFilter').value = '';
+    $('#treeFilter').dispatchEvent(new Event('input', { bubbles: true }));
+    $('#treeFilter').focus();
+    return;
+  }
 
   const row = ev.target.closest('.tree-row');
   if (!row) return;
@@ -473,10 +479,19 @@ async function toggleSchema(serverId, database, schema, forceOpen = false) {
 
 function renderTableNodes(serverId, database, schema, tables) {
   const key = nodeKey('sch', serverId, database, schema);
-  const filter = $('#treeFilter').value.trim().toLowerCase();
+  const rawFilter = $('#treeFilter').value.trim();
+  const filter = rawFilter.toLowerCase();
   const list = filter ? tables.filter((t) => t.name.toLowerCase().includes(filter)) : tables;
 
-  if (!list.length) { setChildren(key, '<p class="tree-loading">該当なし</p>'); return; }
+  if (!list.length) {
+    // テーブルが本当に無いのか、絞り込みで 0 件になっただけなのかを区別する。
+    // ブラウザの自動入力などで意図せず絞り込み欄に文字が入っていることがあるため。
+    setChildren(key, tables.length
+      ? `<p class="tree-loading">「${esc(rawFilter)}」に一致するテーブルがありません
+           <button type="button" class="link-btn" data-act="clear-tree-filter">絞り込みを解除</button></p>`
+      : '<p class="tree-loading">テーブルがありません</p>');
+    return;
+  }
 
   setChildren(key, list.map((t) => {
     const ck = nodeKey('col', serverId, database, schema, t.name);
