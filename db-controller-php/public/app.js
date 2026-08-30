@@ -304,7 +304,6 @@ $('#tree').addEventListener('click', async (ev) => {
   const kind = row.dataset.kind;
 
   if (kind === 'server') return toggleServer(row.dataset.server);
-  if (kind === 'database') return toggleDatabase(row.dataset.server, row.dataset.database);
   if (kind === 'schema') return toggleSchema(row.dataset.server, row.dataset.database, row.dataset.schema);
   if (kind === 'table') {
     return openTable(row.dataset.server, row.dataset.database, row.dataset.schema,
@@ -382,57 +381,29 @@ async function connectServer(id) {
 
   setChildren(key, '<p class="tree-loading">接続中…</p>');
   setStatus(`${s.name} へ接続中…`, false);
+
+  // 接続ごとに DB へ TCP/TLS を張り直すので、1 回の接続でも実時間がかかりうる。
+  // バージョン表示は本題ではないので、ツリーの表示を待たせてまで先に取りに行かない。
+  // 裏で取りに行って、間に合えば添える程度でよい。
+  const infoPromise = api(dbPath(id, 'info')).catch(() => null);
+
   try {
-    const [{ databases, supportsDatabaseSwitch }, info] = await Promise.all([
-      api(dbPath(id, 'databases')),
-      api(dbPath(id, 'info')),
-    ]);
+    // 接続は 1 種類の DB に固定（登録時に指定した database）なので、
+    // 切り替え先を尋ねる問い合わせはせず、そのままスキーマへ進む。
+    await renderSchemas(id, '', key);
     setStatus(`${s.name}`, true);
     setPrompt(`${s.name}`);
     rememberLastServer(id);
+
+    const info = await infoPromise;
     const v = (info && info.info && info.info.version) ? String(info.info.version) : '';
     echoGui(`${s.name} に接続${v ? `（${v.split(/[\r\n]/)[0].slice(0, 40)}）` : ''}`,
             null, `\\use ${s.name}`);
-
-    if (supportsDatabaseSwitch && databases.length) {
-      setChildren(key, databases.map((d) => {
-        const dk = nodeKey('db', id, d.name);
-        const open = Boolean(state.open[dk]);
-        return `<div class="tree-node">
-          <div class="tree-row" data-kind="database" data-server="${id}" data-database="${esc(d.name)}">
-            <span class="tree-caret${open ? ' is-open' : ''}">▶</span>
-            <span class="tree-icon database">◆</span>
-            <span class="tree-label">${esc(d.name)}</span>
-          </div>
-          <div class="tree-children" data-children="${dk}"></div>
-        </div>`;
-      }).join(''));
-      // 既定のデータベースは自動で開く
-      const current = info.database || databases[0].name;
-      if (databases.some((d) => d.name === current)) await toggleDatabase(id, current, true);
-    } else {
-      // Oracle など DB 切り替えの概念が無いものは、スキーマを直接ぶら下げる
-      await renderSchemas(id, '', key);
-    }
   } catch (err) {
     setStatus(`${s.name} 接続失敗`, false);
     setChildren(key, `<p class="tree-loading">${esc(err.message)}</p>`);
     toast(err.message, 'err');
   }
-}
-
-async function toggleDatabase(serverId, database, forceOpen = false) {
-  const key = nodeKey('db', serverId, database);
-  state.open[key] = forceOpen ? true : !state.open[key];
-  const caret = document.querySelector(
-    `[data-kind="database"][data-server="${CSS.escape(serverId)}"][data-database="${CSS.escape(database)}"] .tree-caret`
-  );
-  if (caret) caret.classList.toggle('is-open', state.open[key]);
-  if (!state.open[key]) { setChildren(key, ''); return; }
-
-  state.sel.serverId = serverId;
-  state.sel.database = database;
-  await renderSchemas(serverId, database, key);
 }
 
 async function renderSchemas(serverId, database, parentKey) {
@@ -1947,6 +1918,11 @@ $('#btnCsv').addEventListener('click', async () => {
   $('#csvTarget').textContent = table
     ? `${schema}.${table.name}${database ? ` / ${database}` : ''}`
     : `${schema || '(スキーマ未選択)'}${database ? ` / ${database}` : ''}`;
+
+  // どの接続につないでいるかを、お試し取り込みの説明文にも実名で出す
+  const connName = (serverById(state.sel.serverId) || {}).name || '(接続先不明)';
+  $('#newTableConnName').textContent = connName;
+  $('#csvConnName').textContent = connName;
 
   // 出力・取り込みはテーブルが選ばれていないと使えない
   const hasTable = Boolean(table);

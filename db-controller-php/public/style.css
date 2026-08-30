@@ -1030,3 +1030,9 @@ input[type=file]::file-selector-button {
   max-width: 34em;
 }
 .trial-box .sql-block { margin-top: 4px; }
+
+
+/* ---------- CSV パネルの「どこまでが安全か」手順表示 ---------- */
+.notice.trial-steps { border-left-color: var(--ok); }
+.notice.trial-steps ol { margin: 6px 0 0; padding-left: 18px; }
+.notice.trial-steps li { margin: 3px 0; }

@@ -488,9 +488,14 @@
       <div class="notice danger" id="newTableReadonly" hidden>
         この接続は<strong>読み取り専用</strong>です。テーブルを作るには設定で解除してください。
       </div>
-      <div class="notice">
-        CSV を読み込むと、<strong>全行</strong>を調べて列の型・桁・NULL の有無を推定します。
-        推定結果は下の一覧でそのまま直せます。作成するまで DB は変更しません。
+      <div class="notice trial-steps">
+        <strong>「<span id="newTableConnName">-</span>」につないでいますが、実際に書き込むのは手順 3 だけです。</strong>
+        <ol>
+          <li>CSV を読み込んで構成を推定する — <strong>DB には触れません</strong></li>
+          <li><strong>お試し取り込み</strong>で使い捨てのテーブルに入れてみる —
+              <strong>本番のデータベースは一切変わりません</strong>（読み取り専用の接続でも試せます）</li>
+          <li>問題が無ければ「テーブルを作る」— <strong>ここで初めて実際に作成します</strong></li>
+        </ol>
       </div>
 
       <label class="field">
@@ -534,10 +539,7 @@
         <pre class="sql-block" id="newTableSql"></pre>
 
         <div class="notice">
-          <strong>お試し取り込み</strong>は、この構成の<strong>使い捨てのテーブル</strong>を作って
-          CSV を入れてみます。本番のテーブルは作りませんし、変更もしません。
-          使い捨てのテーブルは終わると自動的に消えます。
-          読み取り専用の接続でも試せます。
+          手順 2：使い捨てのテーブルに入れてみるだけです。終わると自動的に消え、本番には残りません。
         </div>
         <div class="trial-box" id="newTableTrial" hidden></div>
       </div>
@@ -556,6 +558,15 @@
       <div class="notice danger" id="csvImportReadonly" hidden>
         この接続は<strong>読み取り専用</strong>です。取り込むには設定で解除してください。
       </div>
+      <div class="notice trial-steps">
+        <strong>「<span id="csvConnName">-</span>」につないでいますが、実際に書き込むのは手順 3 だけです。</strong>
+        <ol>
+          <li>内容を確認する — <strong>DB には触れません</strong></li>
+          <li><strong>お試し取り込み</strong>で使い捨てのテーブルに入れてみる —
+              <strong>本番のデータベースは一切変わりません</strong>（読み取り専用の接続でも試せます）</li>
+          <li>問題が無ければ「取り込む」— <strong>ここで初めて実際に書き込みます</strong></li>
+        </ol>
+      </div>
       <label class="field">
         <span>CSV ファイル</span>
         <input type="file" id="csvFile" accept=".csv,.txt,text/csv">
@@ -569,9 +580,7 @@
       <p class="muted">文字コードと区切り文字は「自動」で判定します（上で明示も可能）。</p>
       <div id="csvPreview"></div>
       <div class="notice">
-        <strong>お試し取り込み</strong>は、このテーブルと<strong>同じ構造の使い捨てのテーブル</strong>を作って
-        そちらに入れてみます。本番のテーブルは変更しません。
-        通らない行があれば、行番号と理由を全部出します。
+        手順 2：同じ構造の使い捨てのテーブルに入れてみるだけです。通らない行があれば、行番号と理由を全部出します。
       </div>
       <div class="trial-box" id="csvTrial" hidden></div>
       <p class="form-message" id="csvImportMessage"></p>
