@@ -268,6 +268,7 @@ body {
 .pill.postgres { color: #6ec1ff; border-color: #25455f; }
 .pill.source { color: var(--warn); border-color: #56471c; }
 .pill.target { color: var(--ok); border-color: #24503f; }
+.pill.sandbox { color: #17111f; background: var(--ok); border-color: var(--ok); font-weight: 700; }
 
 /* ---------- 検索パネル ---------- */
 .filter-panel {

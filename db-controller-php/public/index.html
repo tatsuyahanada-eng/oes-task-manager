@@ -249,6 +249,7 @@
             <option value="">未設定</option>
             <option value="source">移行元</option>
             <option value="target">移行先</option>
+            <option value="sandbox">検証用</option>
           </select>
         </label>
       </div>
@@ -502,6 +503,16 @@
               <strong>本番のデータベースは一切変わりません</strong>（読み取り専用の接続でも試せます）</li>
           <li>問題が無ければ「テーブルを作る」— <strong>ここで初めて実際に作成します</strong></li>
         </ol>
+      </div>
+
+      <label class="field">
+        <span>作成先</span>
+        <select id="newTableTarget"></select>
+      </label>
+      <div class="notice trial-steps" id="newTableSandboxNote" hidden>
+        <strong>検証用の接続に作ります。</strong>
+        本番のデータベースには、テーブルも行も一切増えません。
+        内容を確かめてから、あらためて本番を作成先に選び直してください。
       </div>
 
       <label class="field">

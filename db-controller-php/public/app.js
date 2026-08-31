@@ -105,6 +105,15 @@ const serverById = (id) => state.servers.find((s) => s.id === id) || null;
  * この接続でデータを変更できるか。
  * 接続が書き込み可であることと、ログイン中の利用者が運用者以上であることの両方が要る。
  */
+/** 接続の「用途」の表示名。（利用者の役割とは別物なので名前を分ける） */
+const CONN_ROLE_LABELS = { source: '移行元', target: '移行先', sandbox: '検証用' };
+const connRoleLabel = (role) => CONN_ROLE_LABELS[role] || role;
+
+/** 検証用（サンドボックス）として登録されている接続。無ければ null。 */
+function sandboxServer() {
+  return state.servers.find((s) => s.role === 'sandbox') || null;
+}
+
 const canWrite = (id) => {
   const s = serverById(id);
   if (!state.me || !state.me.canWrite) return false;
@@ -211,6 +220,8 @@ async function copyFromElement(btn, sourceSelector) {
 async function loadServers(pending = null) {
   const { connections } = await (pending || api('/api/connections'));
   state.servers = connections;
+  // 接続先が変わればスキーマも変わりうるので、覚えていた分は捨てる
+  for (const k of Object.keys(targetSchemaCache)) delete targetSchemaCache[k];
   renderTree();
   renderServerList();
   updateBadges();
@@ -291,6 +302,7 @@ function renderServerNode(s) {
       <span class="tree-icon server">■</span>
       <span class="tree-label">${esc(s.name)}</span>
       <span class="pill ${esc(s.type)}">${esc(driver ? driver.label.split(' ')[0] : s.type)}</span>
+      ${s.role === 'sandbox' ? '<span class="pill sandbox">検証用</span>' : ''}
       ${s.readOnly === false ? '<span class="pill rw">W</span>' : ''}
     </div>
     <div class="tree-children" data-children="${key}">${open ? '<p class="tree-loading">読み込み中…</p>' : ''}</div>
@@ -1600,7 +1612,7 @@ function renderServerList() {
       <div class="server-card-top">
         <span class="server-name">${esc(s.name)}</span>
         <span class="pill ${esc(s.type)}">${esc(d ? d.label.split(' ')[0] : s.type)}</span>
-        ${s.role ? `<span class="pill ${s.role}">${s.role === 'source' ? '移行元' : '移行先'}</span>` : ''}
+        ${s.role ? `<span class="pill ${esc(s.role)}">${esc(connRoleLabel(s.role))}</span>` : ''}
         <span class="pill ${s.readOnly === false ? 'rw' : ''}">${s.readOnly === false ? '書込可' : '読取専用'}</span>
       </div>
       <div class="server-meta">${esc(s.username)}@${esc(target)}</div>
@@ -1992,9 +2004,9 @@ async function openCsvModal() {
     ? `${schema}.${table.name}${database ? ` / ${database}` : ''}`
     : `${schema || '(スキーマ未選択)'}${database ? ` / ${database}` : ''}`;
 
-  // どの接続につないでいるかを、お試し取り込みの説明文にも実名で出す
+  // どの接続につないでいるかを、お試し取り込みの説明文にも実名で出す。
+  // テーブル作成タブの分は、作成先が決まったあとに fillNewTableTargets() が上書きする。
   const connName = (serverById(state.sel.serverId) || {}).name || '(接続先不明)';
-  $('#newTableConnName').textContent = connName;
   $('#csvConnName').textContent = connName;
 
   // 出力・取り込みはテーブルが選ばれていないと使えない
@@ -2021,6 +2033,7 @@ async function openCsvModal() {
   // 開き直すたびに「出力」から始めるので、幅も既定へ戻す
   $('#csvModal .sheet').classList.remove('sheet-wide');
   $('#newTableFile').value = '';
+  fillNewTableTargets();
   resetNewTablePanel();
 
   $('#csvModal').hidden = false;
@@ -2171,10 +2184,77 @@ function resetNewTablePanel() {
   $('#newTableMessage').textContent = '';
   $('#newTableMessage').className = 'form-message';
   $('#btnNewTableCreate').disabled = true;
-  $('#newTableReadonly').hidden = canWrite(state.sel.serverId);
+  $('#newTableReadonly').hidden = canWrite(newTableTargetId());
 }
 
 $('#newTableFile').addEventListener('change', resetNewTablePanel);
+
+/* ---------- 作成先（本番／検証用）の切り替え ----------
+ *
+ * 実データベースにテーブルを増やさずに済ませたい、という要件のための仕組み。
+ * 「検証用」と印を付けた接続があれば、そちらを既定の作成先にする。
+ * 作成先は、SQL の下見・お試し取り込み・実際の作成のすべてで同じものを使う。
+ */
+
+/** 作成先として選ばれている接続の id。 */
+function newTableTargetId() {
+  return $('#newTableTarget').value || state.sel.serverId;
+}
+
+// 接続ごとのスキーマ名は毎回引かずに覚えておく（SQL の下見が入力のたびに走るため）
+const targetSchemaCache = {};
+
+/** 作成先の接続・データベース・スキーマをまとめて返す。 */
+async function newTableTarget() {
+  const id = newTableTargetId();
+  if (id === state.sel.serverId) {
+    return { serverId: id, database: state.sel.database, schema: state.sel.schema };
+  }
+  if (!targetSchemaCache[id]) {
+    const { schemas } = await api(dbPath(id, 'schemas'));
+    if (!schemas.length) throw new Error('作成先にスキーマがありません。接続設定を確かめてください。');
+    const pub = schemas.find((sc) => sc.name === 'public');
+    targetSchemaCache[id] = (pub || schemas[0]).name;
+  }
+  return { serverId: id, database: '', schema: targetSchemaCache[id] };
+}
+
+/** 作成先の選択肢を組み立てる。検証用の接続があれば、そちらを既定にする。 */
+function fillNewTableTargets() {
+  const sel = $('#newTableTarget');
+  const here = serverById(state.sel.serverId);
+  const sandbox = sandboxServer();
+  const opts = [];
+
+  if (sandbox && sandbox.id !== state.sel.serverId) {
+    opts.push(`<option value="${esc(sandbox.id)}">検証用: ${esc(sandbox.name)}</option>`);
+  }
+  if (here) {
+    const isSandbox = here.role === 'sandbox';
+    opts.push(`<option value="${esc(here.id)}">${isSandbox ? '検証用' : '本番'}: ${esc(here.name)}`
+            + `${state.sel.schema ? ` / ${esc(state.sel.schema)}` : ''}</option>`);
+  }
+  sel.innerHTML = opts.join('');
+  // 検証用があるときは、実データベースを既定にしない
+  if (sandbox) sel.value = sandbox.id;
+  updateNewTableTargetUi();
+}
+
+/** 作成先が検証用かどうかで、注意書きと作成ボタンの可否を切り替える。 */
+function updateNewTableTargetUi() {
+  const id = newTableTargetId();
+  const s = serverById(id);
+  $('#newTableSandboxNote').hidden = !(s && s.role === 'sandbox');
+  $('#newTableReadonly').hidden = canWrite(id);
+  // 手順の説明は「つないでいる先」ではなく「実際に作られる先」を指す
+  $('#newTableConnName').textContent = s ? s.name : '(作成先が未選択)';
+}
+
+$('#newTableTarget').addEventListener('change', () => {
+  updateNewTableTargetUi();
+  // 作成先が変わると、同名テーブルの有無も SQL も変わる
+  if (newTablePlan) refreshNewTableSql();
+});
 
 $('#btnNewTableRead').addEventListener('click', async () => {
   const file = $('#newTableFile').files[0];
@@ -2284,21 +2364,22 @@ async function refreshNewTableSql() {
   const msg = $('#newTableMessage');
   const table = $('#newTableName').value.trim();
   const cols = collectNewTableColumns();
-  const body = {
-    schema: state.sel.schema,
-    table,
-    columns: cols,
-    surrogateKey: $('#newTableSurrogate').checked ? surrogateName() : '',
-    preview: true,
-  };
   try {
-    const r = await api(dbPath(state.sel.serverId, 'create-table/preview',
-      { database: state.sel.database }), { method: 'POST', body });
+    const t = await newTableTarget();
+    const body = {
+      schema: t.schema,
+      table,
+      columns: cols,
+      surrogateKey: $('#newTableSurrogate').checked ? surrogateName() : '',
+      preview: true,
+    };
+    const r = await api(dbPath(t.serverId, 'create-table/preview',
+      { database: t.database }), { method: 'POST', body });
     $('#newTableSql').textContent = r.sql;
     msg.className = 'form-message';
     msg.textContent = r.exists ? '同じ名前のテーブルが既にあります。別の名前にしてください。' : '';
     if (r.exists) msg.className = 'form-message err';
-    $('#btnNewTableCreate').disabled = r.exists || !canWrite(state.sel.serverId);
+    $('#btnNewTableCreate').disabled = r.exists || !canWrite(t.serverId);
   } catch (err) {
     $('#newTableSql').textContent = '';
     msg.className = 'form-message err';
@@ -2331,19 +2412,35 @@ function debounceSql() {
   sqlTimer = setTimeout(refreshNewTableSql, 350);
 }
 
-$('#btnNewTableCreate').addEventListener('click', () => {
+$('#btnNewTableCreate').addEventListener('click', async () => {
   if (!newTablePlan) return;
   const table = $('#newTableName').value.trim();
   const cols = collectNewTableColumns().filter((c) => !c.skip);
   const sk = $('#newTableSurrogate').checked ? surrogateName() : '';
-  const { serverId, database, schema } = state.sel;
   // #newTableFile は after の中でリセットするので、それより前に確保しておく
   const carryFile = $('#newTableFile').files[0] || null;
 
+  let serverId, database, schema;
+  try {
+    ({ serverId, database, schema } = await newTableTarget());
+  } catch (err) {
+    const m = $('#newTableMessage');
+    m.className = 'form-message err';
+    m.textContent = err.message;
+    return;
+  }
+  const target = serverById(serverId);
+  const isSandbox = Boolean(target && target.role === 'sandbox');
+
   openConfirm({
     title: 'テーブルを作る',
-    body: `<div class="notice">${esc(schema)}.<strong>${esc(table)}</strong> を
-      ${cols.length} 列${sk ? `（＋自動採番の ${esc(sk)}）` : ''}で作ります。</div>
+    body: `<div class="notice">
+        <strong>${esc(target ? target.name : '')}</strong>${isSandbox ? '（検証用）' : ''} の
+        ${esc(schema)}.<strong>${esc(table)}</strong> を
+        ${cols.length} 列${sk ? `（＋自動採番の ${esc(sk)}）` : ''}で作ります。</div>
+      ${isSandbox
+        ? '<div class="notice trial-steps">作成先は<strong>検証用の接続</strong>です。本番のデータベースは変わりません。</div>'
+        : '<div class="notice danger">作成先は<strong>本番の接続</strong>です。実際にテーブルが増えます。</div>'}
       <div class="notice">この操作は既存のデータを変更しません。作ったあと、
       同じ CSV でそのまま「取り込み」タブへ進みます。</div>`,
     sql: $('#newTableSql').textContent,
@@ -2645,16 +2742,19 @@ $('#newTableTrial').addEventListener('click', handleTrialBoxClick);
 $('#csvTrial').addEventListener('click', handleTrialBoxClick);
 
 /** 実行の共通部分。ボタン・メッセージ欄・結果欄をまとめて面倒みる。 */
-async function runTrial({ btn, box, msg, file, plan, label, context }) {
+async function runTrial({ btn, box, msg, file, plan, label, context, target }) {
   msg.className = 'form-message';
   if (!file) { msg.className = 'form-message err'; msg.textContent = 'CSV ファイルを選んでください。'; return; }
   if (!state.sel.schema) { msg.className = 'form-message err'; msg.textContent = 'ツリーでスキーマを選んでください。'; return; }
 
-  const { serverId, database } = state.sel;
   btn.disabled = true;
   msg.textContent = '試しています…';
   box.hidden = true;
   try {
+    // 作成先が指定されていればそちら（検証用の接続など）で試す
+    const t = target ? await target() : { serverId: state.sel.serverId, database: state.sel.database, schema: state.sel.schema };
+    const { serverId, database } = t;
+    plan = { ...plan, schema: t.schema };
     const r = await postTrial(serverId, database, plan, file);
     renderTrial(box, r, context);
     msg.textContent = '';
@@ -2691,9 +2791,10 @@ $('#btnNewTableTrial').addEventListener('click', () => {
     file: $('#newTableFile').files[0],
     label: $('#newTableName').value.trim() || '新しいテーブル',
     context: 'newtable',
+    target: newTableTarget,
     plan: {
       mode: 'plan',
-      schema: state.sel.schema,
+      schema: state.sel.schema,   // runTrial が作成先のスキーマで上書きする
       table: $('#newTableName').value.trim(),
       columns: collectNewTableColumns().filter((c) => !c.skip),
       surrogateKey: $('#newTableSurrogate').checked ? surrogateName() : '',
