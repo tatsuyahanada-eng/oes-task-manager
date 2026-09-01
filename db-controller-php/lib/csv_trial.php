@@ -43,6 +43,8 @@ function csv_trial_import(DbDriver $drv, string $tempName, array $columns,
     $detected = csv_detect_encoding($bytes);
     if ($encoding === '' || $encoding === 'auto') $encoding = $detected;
 
+    assert_csv_fits_memory(strlen($bytes));
+
     $text = csv_decode($bytes, $encoding);
     $delimiter = ((string)($opts['delimiter'] ?? '')) !== ''
         ? (string)$opts['delimiter'] : csv_detect_delimiter($text);
@@ -52,6 +54,13 @@ function csv_trial_import(DbDriver $drv, string $tempName, array $columns,
 
     $header = array_map('trim', array_shift($rows));
     if (!$rows) throw bad('見出しだけで、データの行がありません。');
+
+    // 本番の取り込みと同じ上限にしておく。
+    // ここで通してしまうと「お試しは通ったのに本番で断られる」ことになる。
+    if (count($rows) > DBC_IMPORT_MAX_ROWS) {
+        throw bad(sprintf('行数が多すぎます（%s 行）。一度に扱えるのは %s 行までです。',
+            number_format(count($rows)), number_format(DBC_IMPORT_MAX_ROWS)));
+    }
 
     // 列の対応づけ（本番の取り込みと同じく、見出しと列名の一致で決める）
     $byName = [];
@@ -75,46 +84,61 @@ function csv_trial_import(DbDriver $drv, string $tempName, array $columns,
     $emptyAsNull = !array_key_exists('emptyAsNull', $opts) || (bool)$opts['emptyAsNull'];
 
     $cols = array_map(fn($m) => $drv->quote($m['column']), $matched);
-    $sql = 'INSERT INTO ' . $drv->quote($tempName)
-         . ' (' . implode(', ', $cols) . ')'
-         . ' VALUES (' . implode(', ', array_fill(0, count($cols), '?')) . ')';
+    $head = 'INSERT INTO ' . $drv->quote($tempName) . ' (' . implode(', ', $cols) . ')';
+    $sql  = csv_batch_sql($head, count($cols), 1);
 
     $pdo = $drv->pdo();
-    $st = $pdo->prepare($sql);
+    @set_time_limit(0);
+
+    // 全部空の行は落としておく（末尾の空行対策）。行番号は元のまま持ち回る。
+    $live = [];
+    foreach ($rows as $i => $r) {
+        if (count(array_filter($r, fn($v) => trim((string)$v) !== '')) === 0) continue;
+        $live[$i] = $r;
+    }
 
     $okCount = 0;
     $errors = [];
     $errorTotal = 0;
 
-    foreach ($rows as $i => $r) {
-        // 全部空の行は飛ばす（末尾の空行対策）
-        if (count(array_filter($r, fn($v) => trim((string)$v) !== '')) === 0) continue;
+    // まずは塊でまとめて入れる。通れば往復が行数分の 1 で済む。
+    // 塊が失敗したときだけ、その塊を 1 行ずつ入れ直して、どの行が悪いかを調べる。
+    $batch = csv_batch_rows(count($cols));
+    $one = $pdo->prepare($sql);
+    $stFull = $batch > 1 ? $pdo->prepare(csv_batch_sql($head, count($cols), $batch)) : $one;
 
-        $params = [];
-        foreach ($matched as $m) {
-            $v = $r[$m['index']] ?? null;
-            if ($v === '' || $v === null) {
-                $params[] = ($emptyAsNull && $m['nullable']) ? null : ($v === null ? null : '');
-                continue;
-            }
-            if (csv_is_bool_column($m['dataType']))      $v = csv_bool_value((string)$v);
-            elseif (csv_is_date_column($m['dataType']))  $v = csv_date_value((string)$v);
-            $params[] = $v;
+    foreach (array_chunk($live, $batch, true) as $chunk) {
+        $flat = [];
+        foreach ($chunk as $r) {
+            foreach (csv_row_params($r, $matched, $emptyAsNull) as $v) $flat[] = $v;
         }
+        $st = count($chunk) === $batch
+            ? $stFull
+            : $pdo->prepare(csv_batch_sql($head, count($cols), count($chunk)));
 
         try {
-            $st->execute($params);
-            $okCount++;
+            $st->execute($flat);
+            $okCount += count($chunk);
+            continue;
         } catch (PDOException $e) {
-            $errorTotal++;
-            if (count($errors) < DBC_TRIAL_MAX_ERRORS) {
-                $errors[] = [
-                    'line'    => $i + 2,          // 見出しが 1 行目
-                    'message' => csv_trial_reason($e->getMessage()),
-                    'raw'     => $e->getMessage(),
-                    // 元の CSV の値（見出しと同じ並び順）。直して出し直せるように。
-                    'row'     => $r,
-                ];
+            // この塊のどこかに通らない行がある。1 行ずつ入れ直して特定する。
+        }
+
+        foreach ($chunk as $i => $r) {
+            try {
+                $one->execute(csv_row_params($r, $matched, $emptyAsNull));
+                $okCount++;
+            } catch (PDOException $e) {
+                $errorTotal++;
+                if (count($errors) < DBC_TRIAL_MAX_ERRORS) {
+                    $errors[] = [
+                        'line'    => $i + 2,          // 見出しが 1 行目
+                        'message' => csv_trial_reason($e->getMessage()),
+                        'raw'     => $e->getMessage(),
+                        // 元の CSV の値（見出しと同じ並び順）。直して出し直せるように。
+                        'row'     => $r,
+                    ];
+                }
             }
         }
     }

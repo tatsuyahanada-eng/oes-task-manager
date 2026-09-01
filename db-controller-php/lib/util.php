@@ -248,3 +248,30 @@ function assert_upload_fits(): void
             bytes_label($up)), 413);
     }
 }
+
+/**
+ * CSV を PHP の配列に広げたとき、メモリが足りるかどうかを先に確かめる。
+ *
+ * 実測では、10 MB の CSV（10 万行 × 10 列）を配列にすると約 84 MB になる。
+ * 目安として元の大きさの 9 倍を見ておく。
+ *
+ * 足りないまま進むと、PHP は途中で強制終了し、画面には何も出ない。
+ * 先に気づいて、何 MB までなら扱えるかを伝える。
+ */
+function assert_csv_fits_memory(int $bytes): void
+{
+    $limit = ini_bytes('memory_limit');
+    if ($limit <= 0) return;                 // 上限なし
+
+    $needed = $bytes * 9;
+    $free   = $limit - memory_get_usage(true);
+
+    if ($needed > $free) {
+        $canDo = max(0, (int)($free / 9));
+        throw bad(sprintf(
+            'このファイル（%s）を読み込むにはメモリが足りません。' .
+            'いまの上限は %s で、扱えるのは %s ほどまでです。' . "\n" .
+            'ファイルを分けて取り込むか、.htaccess に php_value memory_limit 512M を足してください。',
+            bytes_label($bytes), bytes_label($limit), bytes_label($canDo)), 413);
+    }
+}

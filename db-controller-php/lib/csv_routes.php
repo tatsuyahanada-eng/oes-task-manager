@@ -13,7 +13,10 @@
 declare(strict_types=1);
 
 const DBC_IMPORT_BATCH = 500;
-const DBC_IMPORT_MAX_ROWS = 50000;
+const DBC_IMPORT_MAX_ROWS = 200000;
+
+/** 1 文でまとめて入れる行数の上限。DB への往復を減らすため。 */
+const DBC_IMPORT_BATCH_ROWS = 500;
 
 /** 書き出し。件数が多くても詰まらないよう、少しずつ流す。 */
 function csv_export(DbDriver $drv, string $schema, string $table,
@@ -64,6 +67,8 @@ function csv_export(DbDriver $drv, string $schema, string $table,
 function csv_preview(DbDriver $drv, string $schema, string $table,
                      string $bytes, array $opts): array
 {
+    assert_csv_fits_memory(strlen($bytes));
+
     $detail = $drv->describeTable($schema, $table);
     if ($detail['type'] !== 'TABLE') throw bad('ビューには取り込めません。');
 
@@ -260,6 +265,55 @@ function csv_date_value(string $v): string
  * 途中で 1 行でも失敗したら、すべて取り消す。
  * 「半分だけ入った」状態を作らないため。
  */
+/**
+ * 1 行分の値を、そのまま DB へ渡せる形にそろえる。
+ *
+ * 取り込みとお試し取り込みで同じ判断をしたいので、ここに 1 つだけ置く。
+ * $map は ['index'=>CSVの何列目, 'nullable'=>, 'dataType'=>] の並び。
+ */
+function csv_row_params(array $row, array $map, bool $emptyAsNull): array
+{
+    $params = [];
+    foreach ($map as $m) {
+        $v = $row[$m['index']] ?? null;
+        // 空欄の扱い。画面の「空欄は NULL として取り込む」に従う。
+        // NULL を許さない列では、外していても NULL にはできないので空文字のまま入れる。
+        if ($v === '' || $v === null) {
+            $params[] = ($emptyAsNull && $m['nullable']) ? null : ($v === null ? null : '');
+            continue;
+        }
+        // 真偽値の列だけ、true / Y などを 1 / 0 にそろえる
+        if (csv_is_bool_column((string)$m['dataType'])) $v = csv_bool_value((string)$v);
+        // 日付の列だけ、26-AUG-26 などを YYYY-MM-DD にそろえる
+        elseif (csv_is_date_column((string)$m['dataType'])) $v = csv_date_value((string)$v);
+        $params[] = $v;
+    }
+    return $params;
+}
+
+/**
+ * 1 文でまとめて入れる行数を決める。
+ *
+ * 1 行ずつ INSERT すると、行の数だけ DB との往復が起きる。同じサーバの中なら
+ * わずかでも、別のサーバにある DB では往復そのものが積み上がって効いてくる。
+ * まとめれば往復は行数分の 1 になる。
+ *
+ * プレースホルダの数には上限（MySQL / PostgreSQL とも 65535）があるので、
+ * 列数から逆算して収まる範囲に抑える。
+ */
+function csv_batch_rows(int $columnCount): int
+{
+    if ($columnCount < 1) return 1;
+    return max(1, min(DBC_IMPORT_BATCH_ROWS, intdiv(60000, $columnCount)));
+}
+
+/** まとめて入れるための INSERT 文を組み立てる。 */
+function csv_batch_sql(string $head, int $columnCount, int $rowCount): string
+{
+    $one = '(' . implode(', ', array_fill(0, $columnCount, '?')) . ')';
+    return $head . ' VALUES ' . implode(', ', array_fill(0, $rowCount, $one));
+}
+
 function csv_import(DbDriver $drv, string $schema, string $table,
                     string $bytes, array $opts): array
 {
@@ -278,43 +332,41 @@ function csv_import(DbDriver $drv, string $schema, string $table,
     $emptyAsNull = !array_key_exists('emptyAsNull', $opts) || (bool)$opts['emptyAsNull'];
     $cols = array_map(fn($m) => $drv->quote($m['tableColumn']), $matched);
 
-    $sql = 'INSERT INTO ' . $drv->qualify($schema, $table)
-         . ' (' . implode(', ', $cols) . ')'
-         . ' VALUES (' . implode(', ', array_fill(0, count($cols), '?')) . ')';
+    $head = 'INSERT INTO ' . $drv->qualify($schema, $table) . ' (' . implode(', ', $cols) . ')';
+    $sql  = csv_batch_sql($head, count($cols), 1);   // 画面と履歴に見せるのは 1 行分の形
 
+    // 行数が多いと時間がかかる。途中で打ち切られると
+    // トランザクションごと巻き戻ってしまうので、上限を外す。
+    @set_time_limit(0);
+
+    $batch = csv_batch_rows(count($cols));
     $pdo = $drv->pdo();
     $pdo->beginTransaction();
 
     $inserted = 0;
     try {
-        $st = $pdo->prepare($sql);
-        foreach ($rows as $i => $r) {
-            $params = [];
-            foreach ($matched as $m) {
-                $v = $r[$m['index']] ?? null;
-                // 空欄の扱い。画面の「空欄は NULL として取り込む」に従う。
-                // NULL を許さない列では、外していても NULL にはできないので空文字のまま入れる。
-                if ($v === '' || $v === null) {
-                    $params[] = ($emptyAsNull && $m['nullable']) ? null : ($v === null ? null : '');
-                    continue;
-                }
-                // 真偽値の列だけ、true / Y などを 1 / 0 にそろえる
-                if (csv_is_bool_column((string)$m['dataType'])) $v = csv_bool_value((string)$v);
-                // 日付の列だけ、26-AUG-26 などを YYYY-MM-DD にそろえる
-                elseif (csv_is_date_column((string)$m['dataType'])) $v = csv_date_value((string)$v);
-                $params[] = $v;
+        $stFull = $pdo->prepare(csv_batch_sql($head, count($cols), $batch));
+
+        foreach (array_chunk($rows, $batch, true) as $chunk) {
+            $flat = [];
+            foreach ($chunk as $r) {
+                foreach (csv_row_params($r, $matched, $emptyAsNull) as $v) $flat[] = $v;
             }
+            $st = count($chunk) === $batch
+                ? $stFull
+                : $pdo->prepare(csv_batch_sql($head, count($cols), count($chunk)));
             try {
-                $st->execute($params);
+                $st->execute($flat);
             } catch (PDOException $e) {
-                throw bad(sprintf('%d 行目で失敗しました: %s（すべて取り消しました）',
-                    $i + 2, $e->getMessage()));
+                // まとめて入れたので、この中のどの行が悪いのかはまだ分からない。
+                // 巻き戻したうえで、その塊だけ 1 行ずつ入れ直して突き止める。
+                throw bad(csv_pinpoint_failure($drv, $head, $cols, $chunk, $matched, $emptyAsNull, $e));
             }
-            $inserted++;
+            $inserted += count($chunk);
         }
         $pdo->commit();
     } catch (Throwable $e) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) $pdo->rollBack();
         throw $e;
     }
 
@@ -324,6 +376,40 @@ function csv_import(DbDriver $drv, string $schema, string $table,
         'columns'  => array_column($matched, 'tableColumn'),
         'sql'      => $sql,
     ];
+}
+
+/**
+ * まとめて入れて失敗したとき、どの行が原因かを突き止めて文言にする。
+ *
+ * いま開いているトランザクションは巻き戻す（取り込み全体を取り消すため）。
+ * そのうえで、原因を知るためだけに、その塊を 1 行ずつ入れ直してみる。
+ * こちらも最後に巻き戻すので、DB には何も残らない。
+ */
+function csv_pinpoint_failure(DbDriver $drv, string $head, array $cols, array $chunk,
+                              array $matched, bool $emptyAsNull, PDOException $fallback): string
+{
+    $pdo = $drv->pdo();
+    if ($pdo->inTransaction()) $pdo->rollBack();
+
+    try {
+        $pdo->beginTransaction();
+        $one = $pdo->prepare(csv_batch_sql($head, count($cols), 1));
+        foreach ($chunk as $i => $r) {
+            try {
+                $one->execute(csv_row_params($r, $matched, $emptyAsNull));
+            } catch (PDOException $e) {
+                $pdo->rollBack();
+                return sprintf('%d 行目で失敗しました: %s（すべて取り消しました）',
+                    $i + 2, $e->getMessage());
+            }
+        }
+        $pdo->rollBack();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+    }
+
+    // 1 行ずつでは再現しなかった場合（塊の中での重複など）
+    return sprintf('取り込めませんでした: %s（すべて取り消しました）', $fallback->getMessage());
 }
 
 /**

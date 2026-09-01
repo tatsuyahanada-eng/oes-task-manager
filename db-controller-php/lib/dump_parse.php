@@ -78,7 +78,7 @@ function dump_parse(string $bytes, array $opts = []): array
     }
 
     // 行データの在りかを数える。実際の取り出しは、テーブルを選んでから行う。
-    dump_count_rows($text, $dialect, $tables);
+    dump_count_rows($text, $tables);
 
     foreach ($tables as $k => $t) {
         $tables[$k]['columnCount'] = count($t['columns']);
@@ -97,20 +97,18 @@ function dump_parse(string $bytes, array $opts = []): array
 /** テーブル 1 つ分の行データを、CSV と同じ形にして返す。 */
 function dump_extract_csv(string $bytes, string $schema, string $table, array $opts = []): array
 {
-    $encoding = (string)($opts['encoding'] ?? '');
-    if ($encoding === '' || $encoding === 'auto') $encoding = csv_detect_encoding($bytes);
-    $text = csv_decode($bytes, $encoding);
-    $dialect = dump_detect_dialect($text);
-
     $parsed = dump_parse($bytes, $opts);
+
     $target = null;
     foreach ($parsed['tables'] as $t) {
         if (dump_same_table($t, $schema, $table)) { $target = $t; break; }
     }
     if ($target === null) throw bad("テーブル「{$table}」が DUMP の中に見つかりません。");
 
+    // 文字コードの変換は dump_parse() が済ませた条件と同じものを使う
+    $text = csv_decode($bytes, $parsed['encoding']);
     $cols = array_column($target['columns'], 'name');
-    $rows = dump_collect_rows($text, $dialect, $target);
+    $rows = dump_collect_rows($text, $target);
 
     return ['columns' => $cols, 'rows' => $rows, 'csv' => dump_rows_to_csv($cols, $rows)];
 }
@@ -505,7 +503,7 @@ function dump_apply_alter(string $stmt, array &$tables): void
  * ---------------------------------------------------------- */
 
 /** どのテーブルに何行あるかだけを数える（中身は取り出さない）。 */
-function dump_count_rows(string $text, string $dialect, array &$tables): void
+function dump_count_rows(string $text, array &$tables): void
 {
     foreach ($tables as $key => $t) {
         $n = 0;
@@ -530,7 +528,7 @@ function dump_count_rows(string $text, string $dialect, array &$tables): void
 }
 
 /** テーブル 1 つ分の行を取り出す。 */
-function dump_collect_rows(string $text, string $dialect, array $table): array
+function dump_collect_rows(string $text, array $table): array
 {
     $cols = array_column($table['columns'], 'name');
     $rows = [];

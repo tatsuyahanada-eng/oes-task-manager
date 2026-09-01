@@ -99,15 +99,6 @@ function users_list(): array
     return array_map('user_public', users_load()['users']);
 }
 
-/** 初期パスワードのままの利用者がいるか。 */
-function any_default_password(): bool
-{
-    foreach (users_load()['users'] as $u) {
-        if (!empty($u['isDefaultPassword']) && empty($u['disabled'])) return true;
-    }
-    return false;
-}
-
 function admin_count(array $users): int
 {
     $n = 0;
