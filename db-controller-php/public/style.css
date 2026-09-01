@@ -1053,3 +1053,7 @@ input[type=file]::file-selector-button {
 .notice.trial-steps { border-left-color: var(--ok); }
 .notice.trial-steps ol { margin: 6px 0 0; padding-left: 18px; }
 .notice.trial-steps li { margin: 3px 0; }
+
+/* ---------- DUMP 読み取り ---------- */
+.dump-tables { max-height: 34vh; border: 1px solid var(--border); border-radius: 6px; }
+.dump-tables td { vertical-align: middle; }

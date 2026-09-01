@@ -190,3 +190,61 @@ function is_secure(): bool
     $proto = (string)($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '');
     return strtolower(explode(',', $proto)[0]) === 'https';
 }
+
+/* ------------------------------------------------------------
+ * アップロードの大きさ
+ * ---------------------------------------------------------- */
+
+/** php.ini の「8M」のような表記を、バイト数に直す。 */
+function ini_bytes(string $key): int
+{
+    $v = trim((string)ini_get($key));
+    if ($v === '' || $v === '-1') return 0;          // 0 は「上限なし」として扱う
+    $unit = strtolower(substr($v, -1));
+    $n = (int)$v;
+    if ($unit === 'g') return $n * 1024 * 1024 * 1024;
+    if ($unit === 'm') return $n * 1024 * 1024;
+    if ($unit === 'k') return $n * 1024;
+    return $n;
+}
+
+function bytes_label(int $bytes): string
+{
+    if ($bytes >= 1048576) return round($bytes / 1048576, 1) . ' MB';
+    if ($bytes >= 1024) return round($bytes / 1024) . ' KB';
+    return $bytes . ' B';
+}
+
+/**
+ * 送られてきたファイルが、PHP の受け取り上限を超えていないか確かめる。
+ *
+ * 上限を超えると PHP は本文を丸ごと捨ててしまう。そのままでは
+ * 「項目が空です」のような見当違いの案内になり、原因にたどり着けない。
+ * ここで先に気づいて、どの設定をいくつにすればよいかまで伝える。
+ */
+function assert_upload_fits(): void
+{
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') return;
+
+    $len  = (int)($_SERVER['CONTENT_LENGTH'] ?? 0);
+    $post = ini_bytes('post_max_size');
+    $up   = ini_bytes('upload_max_filesize');
+
+    // 本文ごと捨てられた形（$_POST も $_FILES も空）
+    if ($len > 0 && $post > 0 && $len > $post && !$_POST && !$_FILES) {
+        throw bad(sprintf(
+            'ファイルが大きすぎます（%s）。このサーバは一度に %s までしか受け取れません。' .
+            "\n" . '.htaccess に次の 2 行を足すと増やせます（数字はお好みで）:' . "\n" .
+            'php_value post_max_size 128M' . "\n" . 'php_value upload_max_filesize 128M',
+            bytes_label($len), bytes_label($post)), 413);
+    }
+
+    // ファイル単位の上限に引っかかった形
+    if (isset($_FILES['file']['error'])
+        && (int)$_FILES['file']['error'] === UPLOAD_ERR_INI_SIZE) {
+        throw bad(sprintf(
+            'ファイルが大きすぎます。1 ファイルあたり %s までです。' .
+            "\n" . '.htaccess に php_value upload_max_filesize 128M を足すと増やせます。',
+            bytes_label($up)), 413);
+    }
+}

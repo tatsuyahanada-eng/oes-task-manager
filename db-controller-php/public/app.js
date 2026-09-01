@@ -557,6 +557,25 @@ async function toggleColumns(serverId, database, schema, table) {
   }
 }
 
+/*
+ * 絞り込み欄は、必ず空で始まる。
+ *
+ * ブラウザやパスワードマネージャーが、ログイン用のユーザー名をこの欄へ
+ * 誤って入れてしまうことがある。属性で断っても入る場合があるので、
+ * 起動直後に実際の値を見て、こちらが入れた覚えの無いものは捨てる。
+ * 自動入力はページ表示より遅れて来ることがあるため、少し後にもう一度見る。
+ */
+function clearAutofilledTreeFilter() {
+  const el = $('#treeFilter');
+  if (el.value === '') return;
+  el.value = '';
+  // 既に絞り込みが効いた状態で描かれていれば、元に戻す
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
+clearAutofilledTreeFilter();
+[100, 400, 1200].forEach((ms) => setTimeout(clearAutofilledTreeFilter, ms));
+window.addEventListener('pageshow', clearAutofilledTreeFilter);
+
 $('#treeFilter').addEventListener('input', () => {
   const { serverId, database, schema } = state.sel;
   if (!serverId || !schema) return;
@@ -2187,7 +2206,10 @@ function resetNewTablePanel() {
   $('#newTableReadonly').hidden = canWrite(newTableTargetId());
 }
 
-$('#newTableFile').addEventListener('change', resetNewTablePanel);
+$('#newTableFile').addEventListener('change', () => {
+  dumpSource = null;         // CSV を選んだので、DUMP から来た構成は捨てる
+  resetNewTablePanel();
+});
 
 /* ---------- 作成先（本番／検証用）の切り替え ----------
  *
@@ -2419,6 +2441,8 @@ $('#btnNewTableCreate').addEventListener('click', async () => {
   const sk = $('#newTableSurrogate').checked ? surrogateName() : '';
   // #newTableFile は after の中でリセットするので、それより前に確保しておく
   const carryFile = $('#newTableFile').files[0] || null;
+  const fromDump = dumpFromSource();
+  const dump = fromDump ? { ...dumpSource } : null;
 
   let serverId, database, schema;
   try {
@@ -2457,6 +2481,12 @@ $('#btnNewTableCreate').addEventListener('click', async () => {
       $('#newTableFile').value = '';
 
       await openTable(serverId, database, schema, table, 'TABLE');
+
+      // DUMP から作ったときは、その DUMP の行をそのまま入れられるようにする
+      if (fromDump) {
+        await confirmDumpImport(serverId, database, schema, table, dump);
+        return;
+      }
       if (carryFile) {
         await openImportWithCarriedFile(carryFile);
       } else {
@@ -2481,6 +2511,11 @@ function importQuery(extra = {}) {
   q.set('emptyAsNull', $('#csvEmptyAsNull').checked ? 'true' : 'false');
   for (const [k, v] of Object.entries(extra)) q.set(k, v);
   return { serverId, qs: q.toString() };
+}
+
+/** File をそのまま本文として送る。 */
+async function postCsvFile(path, file) {
+  return postCsv(path, await file.arrayBuffer());
 }
 
 async function postCsv(path, buffer) {
@@ -2586,6 +2621,149 @@ $('#btnCsvImport').addEventListener('click', () => {
            + ` × ${p.totalRows} 行`,
   });
 });
+
+/* ============================================================
+ * DUMP ファイルから構成を読み取る
+ *
+ * CSV は中身から型を「推定」するしかないが、DUMP には移行元が宣言した
+ * 型がそのまま書いてある。桁も NULL の可否も主キーも分かるので、
+ * 受け皿のテーブルをより正確に作れる。
+ *
+ * 読み取った構成は「テーブル作成」タブへ渡す。そこから先（一覧での修正・
+ * お試し取り込み・作成・取り込み）は CSV のときと同じ道を通る。
+ * ========================================================== */
+
+/** いま読み込んでいる DUMP。テーブルを選ぶと、その出どころを覚えておく。 */
+let dumpSource = null;
+
+function resetDumpPanel() {
+  dumpSource = null;
+  $('#dumpResult').hidden = true;
+  $('#dumpMessage').textContent = '';
+  $('#dumpMessage').className = 'form-message';
+}
+
+$('#dumpFile').addEventListener('change', resetDumpPanel);
+
+$('#btnDumpRead').addEventListener('click', async () => {
+  const file = $('#dumpFile').files[0];
+  const msg = $('#dumpMessage');
+  msg.className = 'form-message';
+  if (!file) { msg.className = 'form-message err'; msg.textContent = 'DUMP ファイルを選んでください。'; return; }
+
+  msg.textContent = '読み取っています…';
+  $('#dumpResult').hidden = true;
+  try {
+    const buffer = await file.arrayBuffer();
+    const { serverId, database } = state.sel;
+    const q = new URLSearchParams();
+    if (database) q.set('database', database);
+    const enc = $('#csvEncoding').value;
+    if (enc && enc !== 'auto') q.set('encoding', enc);
+
+    const r = await postCsv(`/api/db/${serverId}/dump/inspect?${q}`, buffer);
+    renderDumpResult(r, file);
+    msg.textContent = '';
+    echoGui(`${file.name} から構成を読み取り（${r.dialectLabel} / ${r.tables.length} テーブル）`, null, null);
+  } catch (err) {
+    $('#dumpResult').hidden = true;
+    msg.className = 'form-message err';
+    msg.textContent = err.message;
+  }
+});
+
+function renderDumpResult(r, file) {
+  dumpSource = { file, dialect: r.dialect, dialectLabel: r.dialectLabel, tables: r.tables };
+
+  $('#dumpSummary').innerHTML = `
+    <dt>DUMP の種別</dt><dd>${esc(r.dialectLabel)}</dd>
+    <dt>文字コード</dt><dd>${esc(r.encodingLabel)}</dd>
+    <dt>テーブル数</dt><dd>${num(r.tables.length)}</dd>`;
+
+  $('#dumpNotes').innerHTML = (r.notes || [])
+    .map((n) => `<div class="csv-warn">${esc(n)}</div>`).join('');
+
+  $('#dumpTableList').innerHTML = r.tables.map((t, i) => `<tr>
+      <td>${esc(t.schema || '—')}</td>
+      <td><strong>${esc(t.name)}</strong></td>
+      <td class="num">${num(t.columnCount)}</td>
+      <td class="num">${t.rowCount ? num(t.rowCount) : '—'}</td>
+      <td>${t.primaryKey.length ? esc(t.primaryKey.join(', ')) : '<span class="muted">なし</span>'}</td>
+      <td><button type="button" class="btn btn-sm" data-dump-pick="${i}">この構成を使う</button></td>
+    </tr>`).join('');
+
+  $('#dumpResult').hidden = false;
+}
+
+// テーブルを選んだら、その構成を「テーブル作成」タブへ渡す
+$('#dumpTableList').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('[data-dump-pick]');
+  if (!btn || !dumpSource) return;
+  const t = dumpSource.tables[Number(btn.dataset.dumpPick)];
+  if (!t) return;
+
+  dumpSource.schema = t.schema;
+  dumpSource.table = t.name;
+
+  // CSV から推定したときと同じ形にして、そのまま一覧へ流し込む
+  newTablePlan = {
+    tableName: t.name,
+    rowCount: t.rowCount,
+    columnCount: t.columnCount,
+    addSurrogateKey: false,
+    surrogateKeyName: 'id',
+    notes: [],
+    columns: t.columns.map((c) => ({
+      ...c,
+      blankCount: 0,
+      maxLength: c.length || 0,
+      samples: [c.sourceType],
+      reason: c.reason,
+    })),
+  };
+  renderNewTable(newTablePlan);
+  $('#btnNewTableTrial').disabled = false;
+  $('#newTableFile').value = '';
+  switchCsvTab('newtable');
+  $('#newTableMessage').className = 'form-message';
+  $('#newTableMessage').textContent =
+    `${dumpSource.dialectLabel} の DUMP から「${t.name}」の構成を読み込みました。`
+    + `お試し取り込みも、この DUMP の行で行います。`;
+  toast(`${t.name} の構成を読み込みました`, 'ok');
+});
+
+/** 作ったテーブルへ、DUMP の行をそのまま入れる（確認をはさむ）。 */
+async function confirmDumpImport(serverId, database, schema, table, dump) {
+  const q = new URLSearchParams({ schema, table, dumpSchema: dump.schema || '', dumpTable: dump.table });
+  if (database) q.set('database', database);
+  const enc = $('#csvEncoding').value;
+  if (enc && enc !== 'auto') q.set('encoding', enc);
+
+  const t = (dump.tables || []).find((x) => x.name === dump.table) || {};
+  const rows = t.rowCount || 0;
+
+  if (!rows) {
+    toast('テーブルは作りましたが、この DUMP に行データはありませんでした。', 'warn');
+    return;
+  }
+
+  openConfirm({
+    title: 'DUMP のデータを取り込む',
+    danger: true,
+    confirmLabel: '取り込む',
+    alertOnSuccess: true,
+    body: `<div class="notice danger"><strong>${num(rows)} 行</strong>を
+        <strong>${esc(schema)}.${esc(table)}</strong> に入れます。<br>
+        1 行でも失敗した場合は、すべて取り消します。</div>
+      <div class="notice">元になるのは ${esc(dump.dialectLabel)} の DUMP、
+        テーブル <strong>${esc(dump.table)}</strong> です。</div>`,
+    sql: `INSERT INTO ${schema}.${table} ... ;\n\n-- DUMP から取り出した ${num(rows)} 行を、`
+       + `1 つのトランザクションで実行します\n-- 値はすべてバインド変数として渡されます`,
+    run: () => postCsvFile(`/api/db/${serverId}/dump/import?${q}`, dump.file),
+    done: 'DUMP のデータを取り込みました',
+    cuiHint: `INSERT INTO ${schema}.${table} ... × ${num(rows)} 行`,
+  });
+}
 
 /* ============================================================
  * お試し取り込み
@@ -2788,12 +2966,15 @@ $('#btnNewTableTrial').addEventListener('click', () => {
     btn: $('#btnNewTableTrial'),
     box: $('#newTableTrial'),
     msg: $('#newTableMessage'),
-    file: $('#newTableFile').files[0],
+    file: dumpFromSource() ? dumpSource.file : $('#newTableFile').files[0],
     label: $('#newTableName').value.trim() || '新しいテーブル',
     context: 'newtable',
     target: newTableTarget,
     plan: {
-      mode: 'plan',
+      // DUMP から来た構成のときは、その DUMP の行をサーバ側で取り出して試す
+      mode: dumpFromSource() ? 'dump' : 'plan',
+      dumpSchema: dumpFromSource() ? dumpSource.schema : '',
+      dumpTable: dumpFromSource() ? dumpSource.table : '',
       schema: state.sel.schema,   // runTrial が作成先のスキーマで上書きする
       table: $('#newTableName').value.trim(),
       columns: collectNewTableColumns().filter((c) => !c.skip),
@@ -2802,6 +2983,11 @@ $('#btnNewTableTrial').addEventListener('click', () => {
     },
   });
 });
+
+/** いまの構成が DUMP から来たものか。 */
+function dumpFromSource() {
+  return Boolean(dumpSource && dumpSource.table);
+}
 
 // いま選んでいるテーブルと同じ構造で試す
 $('#btnCsvTrial').addEventListener('click', () => {

@@ -22,6 +22,7 @@ require __DIR__ . '/lib/driver_pgsql.php';
 require __DIR__ . '/lib/write.php';
 require __DIR__ . '/lib/csv.php';
 require __DIR__ . '/lib/csv_routes.php';
+require __DIR__ . '/lib/dump_parse.php';
 require __DIR__ . '/lib/schema_infer.php';
 require __DIR__ . '/lib/csv_trial.php';
 require __DIR__ . '/lib/theme.php';
@@ -415,12 +416,28 @@ function route_connections(string $method, array $seg): void
 
 /* ---------------- データの参照と変更 ---------------- */
 
+/** アップロードされた DUMP の中身を取り出す（multipart / 生ボディの両方）。 */
+function dump_upload_bytes(): string
+{
+    $bytes = (isset($_FILES['file']) && is_uploaded_file((string)$_FILES['file']['tmp_name']))
+        ? (string)file_get_contents((string)$_FILES['file']['tmp_name'])
+        : raw_in();
+    if ($bytes === '') json_out(['error' => 'DUMP ファイルが空です。'], 400);
+    return $bytes;
+}
+
 function route_db(string $method, array $seg): void
 {
     $connectionId = $seg[0] ?? '';
     if ($connectionId === '') return;
 
     $user = require_login();
+
+    // 送られてきたファイルが PHP の受け取り上限を超えていないか、
+    // 何かを読み取ろうとする前に確かめる。超えていると本文が丸ごと
+    // 空になるため、後段では「項目が空です」という別の話に化けてしまう。
+    assert_upload_fits();
+
     $conn = store_runtime($connectionId);
     if ($conn === null) json_out(['error' => '接続が見つかりません。'], 404);
 
@@ -589,7 +606,18 @@ function route_db(string $method, array $seg): void
         $bytes = (isset($_FILES['file']) && is_uploaded_file((string)$_FILES['file']['tmp_name']))
             ? (string)file_get_contents((string)$_FILES['file']['tmp_name'])
             : raw_in();
-        if ($bytes === '') json_out(['error' => 'CSV が空です。'], 400);
+        if ($bytes === '') json_out(['error' => 'ファイルが空です。'], 400);
+
+        // DUMP のときは、選ばれたテーブルの行を取り出して CSV に直す。
+        // ここから先は CSV のときとまったく同じ道を通る。
+        if ($mode === 'dump') {
+            $picked = dump_extract_csv($bytes, (string)$param('dumpSchema'),
+                                       (string)$param('dumpTable'), $opts);
+            $bytes = $picked['csv'];
+            $opts['encoding'] = 'utf-8-nobom';
+            $opts['delimiter'] = ',';
+            $mode = 'plan';
+        }
 
         $temp = csv_trial_table_name();
 
@@ -626,6 +654,47 @@ function route_db(string $method, array $seg): void
             'sql' => 'お試し取り込み（一時テーブル。本番は変更していません）',
         ]);
         json_out(['mode' => $mode, 'target' => $target, 'createSql' => $createSql] + $result);
+    }
+
+    /* ---- DUMP ファイルの読み取り ----
+     *
+     * 移行元が宣言した型がそのまま書いてあるので、CSV から推定するより正確。
+     * ここでは読むだけで、DB には一切触れない。
+     */
+    if ($head === 'dump' && ($rest[1] ?? '') === 'inspect' && $method === 'POST') {
+        $bytes = dump_upload_bytes();
+        json_out(dump_parse($bytes, ['encoding' => (string)($_GET['encoding'] ?? '')]));
+    }
+
+    /* ---- DUMP の 1 テーブルを、実際に取り込む ---- */
+    if ($head === 'dump' && ($rest[1] ?? '') === 'import' && $method === 'POST') {
+        if (!has_role($user, 'operator')) {
+            json_out(['error' => 'この操作には「運用者」以上の権限が必要です。'], 403);
+        }
+        assert_writable($conn);
+
+        $drv = DbDriver::open($conn, $database);
+        $schema = $drv->assertIdentifier((string)($_GET['schema'] ?? ''), 'スキーマ名');
+        $table  = $drv->assertIdentifier((string)($_GET['table'] ?? ''), 'テーブル名');
+
+        $bytes = dump_upload_bytes();
+        $picked = dump_extract_csv($bytes, (string)($_GET['dumpSchema'] ?? ''),
+                                   (string)($_GET['dumpTable'] ?? ''),
+                                   ['encoding' => (string)($_GET['encoding'] ?? '')]);
+
+        $result = csv_import($drv, $schema, $table, $picked['csv'], [
+            'encoding' => 'utf-8-nobom', 'delimiter' => ',',
+            'emptyAsNull' => ($_GET['emptyAsNull'] ?? 'true') !== 'false',
+        ]);
+
+        audit([
+            'action' => 'import', 'user' => $user['username'],
+            'connection' => $conn['name'], 'type' => $conn['type'],
+            'database' => $database, 'target' => "{$schema}.{$table}",
+            'affected' => $result['inserted'],
+            'sql' => 'DUMP からの取り込み (' . implode(', ', $result['columns']) . ')',
+        ]);
+        json_out(['ok' => true] + $result);
     }
 
     /* ---- 作る前の下見。SQL を組み立てるだけで DB は変更しない ---- */

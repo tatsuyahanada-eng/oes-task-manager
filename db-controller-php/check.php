@@ -66,6 +66,31 @@ foreach ($exts as $ext => $why) {
         ($has ? '利用できます' : 'ありません') . ' — ' . $why);
 }
 
+/* ---------------- アップロードの上限 ---------------- */
+/*
+ * CSV や DUMP はここを超えると受け取れません。
+ * PHP は上限を超えた本文を丸ごと捨てるため、気づきにくい失敗になります。
+ */
+function dbc_ini_bytes($key) {
+    $v = trim((string)ini_get($key));
+    if ($v === '' || $v === '-1') return 0;
+    $unit = strtolower(substr($v, -1));
+    $n = (int)$v;
+    if ($unit === 'g') return $n * 1024 * 1024 * 1024;
+    if ($unit === 'm') return $n * 1024 * 1024;
+    if ($unit === 'k') return $n * 1024;
+    return $n;
+}
+$wanted = 32 * 1024 * 1024;   // これくらいは欲しい
+foreach (array('post_max_size', 'upload_max_filesize') as $key) {
+    $b = dbc_ini_bytes($key);
+    $okSize = ($b === 0 || $b >= $wanted);
+    add('アップロード', $key, $okSize ? 'ok' : 'warn',
+        'いまの値: ' . ini_get($key) .
+        ($okSize ? '' : ' — 大きな CSV / DUMP を扱うなら 128M 程度に増やしてください。' .
+                        '.htaccess の php_value、または .user.ini で設定できます'));
+}
+
 /* ---------------- ファイルの配置 ---------------- */
 
 $files = array(
@@ -74,6 +99,7 @@ $files = array(
     'lib/version.php'  => '版の情報',
     'lib/util.php'     => '共通処理',
     'lib/driver.php'   => 'DB ドライバ',
+    'lib/dump_parse.php' => 'DUMP ファイルの読み取り',
     'public/index.html'=> '画面',
     'public/app.js'    => '画面の動作',
     'public/style.css' => '見た目',

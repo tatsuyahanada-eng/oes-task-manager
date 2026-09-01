@@ -11,6 +11,22 @@
 
 DirectoryIndex index.php
 
+# DUMP や大きな CSV を受け取れるようにします。
+# 効かないサーバでは無視されるだけなので、そのままで構いません。
+# （効かない場合は、同じ内容を .user.ini に書くか、契約先の管理画面で設定してください）
+<IfModule mod_php.c>
+    php_value post_max_size 128M
+    php_value upload_max_filesize 128M
+</IfModule>
+<IfModule mod_php7.c>
+    php_value post_max_size 128M
+    php_value upload_max_filesize 128M
+</IfModule>
+<IfModule mod_php8.c>
+    php_value post_max_size 128M
+    php_value upload_max_filesize 128M
+</IfModule>
+
 <IfModule mod_rewrite.c>
     RewriteEngine On
 

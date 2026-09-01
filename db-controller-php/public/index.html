@@ -65,8 +65,9 @@
       </div>
     </div>
     <div class="tree-filter">
-      <input type="search" id="treeFilter" placeholder="テーブル名で絞り込み"
-             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+      <input type="search" id="treeFilter" name="dbc-table-filter" placeholder="テーブル名で絞り込み"
+             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+             data-lpignore="true" data-1p-ignore data-form-type="other" data-bwignore>
     </div>
     <div class="tree" id="tree">
       <!--
@@ -85,7 +86,7 @@
       <h2 id="dataTitle">データ</h2>
       <div class="pane-actions">
         <button class="btn btn-sm" id="btnColumns">列定義</button>
-        <button class="btn btn-sm" id="btnCsv">CSV</button>
+        <button class="btn btn-sm" id="btnCsv">Migration</button>
         <button class="btn btn-sm btn-write" id="btnAddRow" hidden>+ 行追加</button>
         <button class="btn btn-sm btn-danger" id="btnDropTable" hidden>テーブルを削除</button>
       </div>
@@ -449,13 +450,14 @@
 <div class="sheet-backdrop" id="csvModal" hidden>
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="csvTitle">
     <div class="sheet-head">
-      <h2 id="csvTitle">CSV 入出力</h2>
+      <h2 id="csvTitle">Migration — CSV / DUMP からの移行</h2>
       <button class="icon-btn" id="btnCloseCsv" aria-label="閉じる">✕</button>
     </div>
     <p class="sheet-sub" id="csvTarget"></p>
 
     <div class="seg" id="csvTabs">
       <button class="seg-btn is-active" data-csv="export">出力</button>
+      <button class="seg-btn" data-csv="dump">DUMP 読み取り</button>
       <button class="seg-btn" data-csv="newtable">テーブル作成</button>
       <button class="seg-btn" data-csv="import">取り込み</button>
       <button class="seg-btn" data-csv="backup">一括バックアップ</button>
@@ -487,6 +489,48 @@
       <div class="sheet-actions">
         <span class="spacer"></span>
         <button type="button" class="btn btn-primary" id="btnExportTable">このテーブルを出力</button>
+      </div>
+    </section>
+
+    <!-- DUMP ファイルから構成を読み取る -->
+    <section class="csv-panel" data-csv-panel="dump">
+      <div class="notice trial-steps">
+        <strong>移行元の DUMP から、宣言された型をそのまま読み取ります。</strong>
+        CSV からの推定と違い、桁・NULL の可否・主キーまで正確に分かります。
+        <ol>
+          <li>DUMP を読み込む — <strong>DB には触れません</strong></li>
+          <li>使いたいテーブルを選ぶ — 構成が「テーブル作成」タブに入ります</li>
+          <li>そこで、お試し取り込み → テーブル作成 → 取り込み と進みます</li>
+        </ol>
+      </div>
+      <div class="notice">
+        読めるのは<strong>テキストの SQL</strong> です
+        （mysqldump / pg_dump -Fp / SQL Developer の DDL+INSERT / SSMS のスクリプト）。<br>
+        Oracle の <code>.dmp</code>、SQL Server の <code>.bak</code>、pg_dump の <code>-Fc</code> は
+        バイナリのため読めません。テキストの SQL で出し直してください。
+      </div>
+
+      <label class="field">
+        <span>DUMP ファイル（.sql）</span>
+        <input type="file" id="dumpFile" accept=".sql,.txt,.ddl,text/plain">
+      </label>
+
+      <div id="dumpResult" hidden>
+        <dl class="csv-summary" id="dumpSummary"></dl>
+        <div id="dumpNotes"></div>
+        <p class="section-label">見つかったテーブル</p>
+        <div class="grid-wrap dump-tables">
+          <table class="grid">
+            <thead><tr><th>スキーマ</th><th>テーブル</th><th>列</th><th>行</th><th>主キー</th><th></th></tr></thead>
+            <tbody id="dumpTableList"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <p class="form-message" id="dumpMessage"></p>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn" id="btnDumpRead">構成を読み取る</button>
       </div>
     </section>
 
