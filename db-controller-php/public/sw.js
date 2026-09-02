@@ -7,7 +7,7 @@
  *     DB のデータや接続情報が端末に residual として残らないようにするため
  * ========================================================== */
 
-const CACHE = 'dbctl-shell-v30';
+const CACHE = 'dbctl-shell-v31';
 
 const SHELL = [
   './',
@@ -53,19 +53,22 @@ self.addEventListener('fetch', (event) => {
   const cacheable = (res) =>
     res && res.ok && res.status === 200 && res.type === 'basic' && !res.redirected;
 
-  // 画面の外枠はキャッシュ優先。オフラインでも起動だけはできるようにする。
+  // 画面の外枠は「まずネットワーク、駄目ならキャッシュ」。
+  //
+  // 以前はキャッシュ優先にしていたが、それだと更新した画面が
+  // 次に起動したときにしか反映されず、直したはずの不具合が
+  // 直っていないように見えてしまう。
+  // このツールはネットワークが繋がっている前提で使うものなので、
+  // 常に最新を取りに行き、繋がらないときだけキャッシュで起動する。
   event.respondWith(
-    caches.match(request).then((hit) => {
-      if (hit) {
-        // 裏で更新しておく
-        fetch(request)
-          .then((res) => {
-            if (cacheable(res)) caches.open(CACHE).then((c) => c.put(request, res.clone()));
-          })
-          .catch(() => {});
-        return hit;
-      }
-      return fetch(request).catch(() => caches.match('./index.html'));
-    })
+    fetch(request)
+      .then((res) => {
+        if (cacheable(res)) {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(request, copy));
+        }
+        return res;
+      })
+      .catch(() => caches.match(request).then((hit) => hit || caches.match('./index.html')))
   );
 });

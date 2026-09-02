@@ -65,9 +65,14 @@
       </div>
     </div>
     <div class="tree-filter">
+      <!--
+        readonly で始めるのは、パスワードマネージャーがこの欄を
+        「入力するところ」と見なして勝手に埋めるのを防ぐため。
+        利用者が触った時点で readonly を外すので、使い勝手は変わらない。
+      -->
       <input type="search" id="treeFilter" name="dbc-table-filter" placeholder="テーブル名で絞り込み"
              autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-             data-lpignore="true" data-1p-ignore data-form-type="other" data-bwignore>
+             data-lpignore="true" data-1p-ignore data-form-type="other" data-bwignore readonly>
     </div>
     <div class="tree" id="tree">
       <!--

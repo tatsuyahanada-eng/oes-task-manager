@@ -319,6 +319,7 @@ $('#tree').addEventListener('click', async (ev) => {
   if (ev.target.dataset.act === 'add-server') return openServerModal(null);
   if (ev.target.dataset.act === 'clear-tree-filter') {
     $('#treeFilter').value = '';
+    treeFilterArmed = false;
     $('#treeFilter').dispatchEvent(new Event('input', { bubbles: true }));
     $('#treeFilter').focus();
     return;
@@ -491,7 +492,7 @@ async function toggleSchema(serverId, database, schema, forceOpen = false) {
 
 function renderTableNodes(serverId, database, schema, tables) {
   const key = nodeKey('sch', serverId, database, schema);
-  const rawFilter = $('#treeFilter').value.trim();
+  const rawFilter = treeFilterValue();
   const filter = rawFilter.toLowerCase();
   const list = filter ? tables.filter((t) => t.name.toLowerCase().includes(filter)) : tables;
 
@@ -558,22 +559,50 @@ async function toggleColumns(serverId, database, schema, table) {
 }
 
 /*
- * 絞り込み欄は、必ず空で始まる。
+ * 絞り込み欄は、利用者が自分で打ち込んだときだけ効く。
  *
  * ブラウザやパスワードマネージャーが、ログイン用のユーザー名をこの欄へ
- * 誤って入れてしまうことがある。属性で断っても入る場合があるので、
- * 起動直後に実際の値を見て、こちらが入れた覚えの無いものは捨てる。
- * 自動入力はページ表示より遅れて来ることがあるため、少し後にもう一度見る。
+ * 誤って入れてしまうことがある。属性で断っても、消しても、また入る
+ * ことがあったので、「入れさせない」ではなく「入っていても効かない」
+ * 作りにした。こうすれば、何が入っても一覧が消えることはない。
+ *
+ *   1. readonly で始める      … そもそも自動入力の的になりにくくする
+ *   2. 触られたら readonly を外す … 打ち込みたい人はそのまま打てる
+ *   3. 自分で打った時だけ効かせる  … 勝手に入った値は絞り込みに使わない
  */
+let treeFilterArmed = false;   // 利用者が自分で打ち込んだか
+
+/** 絞り込みに使う文字。自分で打ったものでなければ、無いものとして扱う。 */
+function treeFilterValue() {
+  return treeFilterArmed ? $('#treeFilter').value.trim() : '';
+}
+
+function armTreeFilter() {
+  treeFilterArmed = true;
+  $('#treeFilter').removeAttribute('readonly');
+}
+
+// 触られた時点で入力できるようにする（readonly のままだと打てない）
+['pointerdown', 'focus', 'touchstart'].forEach((ev) => {
+  $('#treeFilter').addEventListener(ev, () => {
+    $('#treeFilter').removeAttribute('readonly');
+    // 勝手に入っていた値は、打ち始める前にここで消す
+    if (!treeFilterArmed && $('#treeFilter').value !== '') $('#treeFilter').value = '';
+  });
+});
+// 実際に打ち込まれた（貼り付けも含む）ときだけ、絞り込みを効かせる
+['keydown', 'paste'].forEach((ev) => {
+  $('#treeFilter').addEventListener(ev, armTreeFilter);
+});
+
+/** 勝手に入っている値を消す。起動直後と、画面が戻ってきたときに見る。 */
 function clearAutofilledTreeFilter() {
   const el = $('#treeFilter');
-  if (el.value === '') return;
+  if (treeFilterArmed || el.value === '') return;
   el.value = '';
-  // 既に絞り込みが効いた状態で描かれていれば、元に戻す
-  el.dispatchEvent(new Event('input', { bubbles: true }));
 }
 clearAutofilledTreeFilter();
-[100, 400, 1200].forEach((ms) => setTimeout(clearAutofilledTreeFilter, ms));
+[100, 400, 1200, 3000].forEach((ms) => setTimeout(clearAutofilledTreeFilter, ms));
 window.addEventListener('pageshow', clearAutofilledTreeFilter);
 
 $('#treeFilter').addEventListener('input', () => {
