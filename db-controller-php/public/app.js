@@ -318,9 +318,7 @@ function setChildren(key, html) {
 $('#tree').addEventListener('click', async (ev) => {
   if (ev.target.dataset.act === 'add-server') return openServerModal(null);
   if (ev.target.dataset.act === 'clear-tree-filter') {
-    $('#treeFilter').value = '';
-    treeFilterArmed = false;
-    $('#treeFilter').dispatchEvent(new Event('input', { bubbles: true }));
+    treeFilterGuard.reset();
     $('#treeFilter').focus();
     return;
   }
@@ -559,69 +557,86 @@ async function toggleColumns(serverId, database, schema, table) {
 }
 
 /*
- * 絞り込み欄は、利用者が自分で打ち込んだときだけ効く。
+ * 自由入力の欄（絞り込み欄、SQL 条件欄、CUI の入力欄など）は、
+ * 利用者が自分で打ち込んだときだけ効く。
  *
- * ブラウザやパスワードマネージャーが、ログイン用のユーザー名をこの欄へ
- * 誤って入れてしまうことがある。属性で断っても、消しても、また入る
- * ことがあったので、「入れさせない」ではなく「入っていても効かない」
- * 作りにした。こうすれば、何が入っても一覧が消えることはない。
+ * ブラウザやパスワードマネージャーが、ログイン用のユーザー名をこうした欄へ
+ * 誤って入れてしまうことがある。ある欄をふさぐと、別の欄（この画面で
+ * 次に目立つ空欄）へ入り先が移ることも確認したため、1 つの欄だけでなく
+ * 「利用者が自分で触るまでは空のはずの、目立つ自由入力欄」すべてに
+ * 同じ作りを適用する。属性で断っても、消しても、また入ることがあったので、
+ * 「入れさせない」ではなく「入っていても効かない・見た目にも残さない」
+ * 作りにした。
  *
  *   1. readonly で始める      … そもそも自動入力の的になりにくくする
  *   2. 触られたら readonly を外す … 打ち込みたい人はそのまま打てる
- *   3. 自分で打った時だけ効かせる  … 勝手に入った値は絞り込みに使わない
+ *   3. 自分で打った時だけ値として扱う … 勝手に入った値は使わない
+ *   4. 値が変わった瞬間ごとに見る … タイムアウトの隙間を作らない
  */
-let treeFilterArmed = false;   // 利用者が自分で打ち込んだか
+function guardFreeTextInput(el, onArmedChange) {
+  let armed = false;
+
+  function arm() {
+    armed = true;
+    el.removeAttribute('readonly');
+  }
+
+  // 触られた時点で入力できるようにする（readonly のままだと打てない）
+  ['pointerdown', 'focus', 'touchstart'].forEach((ev) => {
+    el.addEventListener(ev, () => {
+      el.removeAttribute('readonly');
+      // 勝手に入っていた値は、打ち始める前にここで消す
+      if (!armed && el.value !== '') el.value = '';
+    });
+  });
+  // 実際に打ち込まれた（貼り付けも含む）ときだけ、自分の値として扱う
+  ['keydown', 'paste'].forEach((ev) => el.addEventListener(ev, arm));
+
+  /** 勝手に入っている値を消す。起動直後と、画面が戻ってきたときに見る。 */
+  function clearIfNotArmed() {
+    if (armed || el.value === '') return;
+    el.value = '';
+  }
+  clearIfNotArmed();
+  [100, 400, 1200, 3000].forEach((ms) => setTimeout(clearIfNotArmed, ms));
+  window.addEventListener('pageshow', clearIfNotArmed);
+
+  // タイムアウトでの掃除だけでは、その隙間（起動直後〜数秒後の間に入る）を
+  // すり抜けられてしまうため、値が変わった瞬間ごとにも見る。
+  // 自動入力・拡張機能・OS のパスワード補完は、値を入れた後に
+  // input（無ければ change）イベントを出すのが通例なので、これで拾える。
+  ['input', 'change'].forEach((ev) => {
+    el.addEventListener(ev, () => {
+      if (!armed) { el.value = ''; return; }
+      if (onArmedChange) onArmedChange();
+    });
+  });
+
+  return {
+    isArmed: () => armed,
+    /** 「クリア」ボタンなどから、空にした上で見た目も更新したいときに使う。 */
+    reset: () => {
+      armed = false;
+      el.value = '';
+      if (onArmedChange) onArmedChange();
+    },
+  };
+}
+
+const treeFilterGuard = guardFreeTextInput($('#treeFilter'), () => {
+  const { serverId, database, schema } = state.sel;
+  if (!serverId || !schema) return;
+  const tables = state.open[nodeKey('tables', serverId, database, schema)];
+  if (Array.isArray(tables)) renderTableNodes(serverId, database, schema, tables);
+});
 
 /** 絞り込みに使う文字。自分で打ったものでなければ、無いものとして扱う。 */
 function treeFilterValue() {
-  return treeFilterArmed ? $('#treeFilter').value.trim() : '';
+  return treeFilterGuard.isArmed() ? $('#treeFilter').value.trim() : '';
 }
 
-function armTreeFilter() {
-  treeFilterArmed = true;
-  $('#treeFilter').removeAttribute('readonly');
-}
-
-// 触られた時点で入力できるようにする（readonly のままだと打てない）
-['pointerdown', 'focus', 'touchstart'].forEach((ev) => {
-  $('#treeFilter').addEventListener(ev, () => {
-    $('#treeFilter').removeAttribute('readonly');
-    // 勝手に入っていた値は、打ち始める前にここで消す
-    if (!treeFilterArmed && $('#treeFilter').value !== '') $('#treeFilter').value = '';
-  });
-});
-// 実際に打ち込まれた（貼り付けも含む）ときだけ、絞り込みを効かせる
-['keydown', 'paste'].forEach((ev) => {
-  $('#treeFilter').addEventListener(ev, armTreeFilter);
-});
-
-/** 勝手に入っている値を消す。起動直後と、画面が戻ってきたときに見る。 */
-function clearAutofilledTreeFilter() {
-  const el = $('#treeFilter');
-  if (treeFilterArmed || el.value === '') return;
-  el.value = '';
-}
-clearAutofilledTreeFilter();
-[100, 400, 1200, 3000].forEach((ms) => setTimeout(clearAutofilledTreeFilter, ms));
-window.addEventListener('pageshow', clearAutofilledTreeFilter);
-
-// 「入っていても効かない」だけでなく「見た目にも残さない」ようにする。
-// タイムアウトでの掃除は、その隙間（起動直後〜数秒後の間に入る）を
-// すり抜けられてしまうため、値が変わった瞬間ごとに見る。
-// 自動入力・拡張機能・OS のパスワード補完は、値を入れた後に
-// input（無ければ change）イベントを出すのが通例なので、これで拾える。
-['input', 'change'].forEach((ev) => {
-  $('#treeFilter').addEventListener(ev, () => {
-    if (!treeFilterArmed) {
-      $('#treeFilter').value = '';
-      return;
-    }
-    const { serverId, database, schema } = state.sel;
-    if (!serverId || !schema) return;
-    const tables = state.open[nodeKey('tables', serverId, database, schema)];
-    if (Array.isArray(tables)) renderTableNodes(serverId, database, schema, tables);
-  });
-});
+guardFreeTextInput($('#whereInput'));
+guardFreeTextInput($('#consoleInput'));
 
 $('#btnRefreshTree').addEventListener('click', async () => {
   state.open = {};

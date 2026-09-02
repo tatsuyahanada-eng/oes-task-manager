@@ -109,7 +109,10 @@
     </div>
 
     <div class="data-controls">
-      <input type="text" id="whereInput" placeholder="SQL条件（上級・任意。例: status = 'A'）">
+      <!-- テーブル名の絞り込み欄と同じ理由で readonly 起点にしてある。app.js 参照 -->
+      <input type="text" id="whereInput" placeholder="SQL条件（上級・任意。例: status = 'A'）"
+             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+             data-lpignore="true" data-1p-ignore data-form-type="other" data-bwignore readonly>
       <select id="limitSelect">
         <option value="25">25件</option>
         <option value="50" selected>50件</option>
@@ -151,7 +154,8 @@
     <form class="console-input" id="consoleForm" autocomplete="off">
       <span class="prompt" id="consolePrompt">$</span>
       <input type="text" id="consoleInput" placeholder="SQL または \help" spellcheck="false"
-             autocapitalize="off" autocorrect="off">
+             autocapitalize="off" autocorrect="off" autocomplete="off"
+             data-lpignore="true" data-1p-ignore data-form-type="other" data-bwignore readonly>
       <button class="btn btn-sm btn-primary" type="submit">実行</button>
     </form>
   </section>
