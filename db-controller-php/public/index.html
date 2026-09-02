@@ -296,7 +296,18 @@
       <div class="field-row">
         <label class="field">
           <span>ユーザー名 <em>*</em></span>
-          <input name="username" required autocapitalize="off">
+          <!--
+            name を username にしていると、ブラウザがこのサイト自体の
+            ログインユーザー名（welsysadm）の欄だと誤認し、
+            DB 側のユーザー名のつもりの欄に welsysadm を自動で
+            入れてしまうことがあった（パスワード欄と同じ理由）。
+            name を dbUsername にし、readonly と自動入力よけの
+            属性をパスワード欄と揃える。送信時に username へ戻す
+            （formPayload 参照）。
+          -->
+          <input name="dbUsername" id="usernameInput" required readonly
+                 autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                 data-lpignore="true" data-1p-ignore data-form-type="other" data-bwignore>
         </label>
         <label class="field">
           <span>パスワード</span>
@@ -315,7 +326,8 @@
           -->
           <input name="dbPassword" type="password" id="passwordInput" readonly
                  autocomplete="new-password" autocorrect="off" autocapitalize="off"
-                 spellcheck="false" placeholder="暗号化して保存されます">
+                 spellcheck="false" placeholder="暗号化して保存されます"
+                 data-lpignore="true" data-1p-ignore data-form-type="other" data-bwignore>
           <small class="hint" id="passwordHint" hidden>空欄なら既存のパスワードを保持します</small>
         </label>
       </div>

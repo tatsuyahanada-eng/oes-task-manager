@@ -605,11 +605,22 @@ clearAutofilledTreeFilter();
 [100, 400, 1200, 3000].forEach((ms) => setTimeout(clearAutofilledTreeFilter, ms));
 window.addEventListener('pageshow', clearAutofilledTreeFilter);
 
-$('#treeFilter').addEventListener('input', () => {
-  const { serverId, database, schema } = state.sel;
-  if (!serverId || !schema) return;
-  const tables = state.open[nodeKey('tables', serverId, database, schema)];
-  if (Array.isArray(tables)) renderTableNodes(serverId, database, schema, tables);
+// 「入っていても効かない」だけでなく「見た目にも残さない」ようにする。
+// タイムアウトでの掃除は、その隙間（起動直後〜数秒後の間に入る）を
+// すり抜けられてしまうため、値が変わった瞬間ごとに見る。
+// 自動入力・拡張機能・OS のパスワード補完は、値を入れた後に
+// input（無ければ change）イベントを出すのが通例なので、これで拾える。
+['input', 'change'].forEach((ev) => {
+  $('#treeFilter').addEventListener(ev, () => {
+    if (!treeFilterArmed) {
+      $('#treeFilter').value = '';
+      return;
+    }
+    const { serverId, database, schema } = state.sel;
+    if (!serverId || !schema) return;
+    const tables = state.open[nodeKey('tables', serverId, database, schema)];
+    if (Array.isArray(tables)) renderTableNodes(serverId, database, schema, tables);
+  });
 });
 
 $('#btnRefreshTree').addEventListener('click', async () => {
@@ -1715,9 +1726,10 @@ function openServerModal(id) {
   form.elements.serviceName.value = v.serviceName || '';
   form.elements.sid.value = v.sid || '';
   form.elements.instanceName.value = v.instanceName || '';
-  form.elements.username.value = v.username || '';
+  form.elements.dbUsername.value = v.username || '';
   form.elements.dbPassword.value = '';
   // 開くたびに readonly へ戻し、自動入力の隙を作らない
+  form.elements.dbUsername.setAttribute('readonly', '');
   form.elements.dbPassword.setAttribute('readonly', '');
   form.elements.role.value = v.role || '';
   form.elements.note.value = v.note || '';
@@ -1811,10 +1823,12 @@ function applyReadOnlyNotice() {
     : '<strong>書き込みを許可します。</strong><br>行の追加・修正・削除と更新系 SQL が可能になります。変更は主キーで特定した 1 行ずつ、実行前の確認を経て行われます。';
 }
 
-// パスワード欄は readonly の状態で置いてある（自動入力よけ）。
+// ユーザー名・パスワード欄は readonly の状態で置いてある（自動入力よけ）。
 // 実際に触られたときだけ入力できるようにする。
-['focus', 'click', 'touchstart'].forEach((ev) => {
-  $('#passwordInput').addEventListener(ev, function () { this.removeAttribute('readonly'); });
+['#usernameInput', '#passwordInput'].forEach((sel) => {
+  ['focus', 'click', 'touchstart'].forEach((ev) => {
+    $(sel).addEventListener(ev, function () { this.removeAttribute('readonly'); });
+  });
 });
 
 $('#typeSelect').addEventListener('change', applyTypeVisibility);
@@ -1826,8 +1840,10 @@ $('#btnCloseServer').addEventListener('click', closeServerModal);
 
 function formPayload() {
   const d = Object.fromEntries(new FormData(form).entries());
-  // 入力欄の name は dbPassword にしてある（ブラウザの自動入力よけ）。
-  // サーバへは password として送る。
+  // 入力欄の name は dbUsername / dbPassword にしてある（ブラウザの自動入力よけ）。
+  // サーバへは username / password として送る。
+  d.username = d.dbUsername || '';
+  delete d.dbUsername;
   d.password = d.dbPassword || '';
   delete d.dbPassword;
   const p = {
